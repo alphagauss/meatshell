@@ -35,6 +35,11 @@ When your changes create orphans:
 
 The test: Every changed line should trace directly to the user's request.
 
+Code Map Discipline
+Before any code-related add, delete, modify, or search, read `docs/code-map.md` first.
+If a change adds, removes, renames, moves, or rewires a file, function, callback, struct, or component, update `docs/code-map.md` in the same change.
+Use the code map as the first place to orient yourself before falling back to broad repository-wide searches.
+
 Fork / Upstream Sync
 This repository is a fork. Keep `main` aligned with upstream; personal changes
 live on `dev`.
