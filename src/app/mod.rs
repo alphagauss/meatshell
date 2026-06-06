@@ -13,6 +13,7 @@ mod platform;
 mod sessions;
 mod sftp_panel;
 mod sidebar;
+mod state;
 mod tabs;
 mod terminal_input;
 mod terminal_render;
@@ -30,7 +31,7 @@ use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use tokio::runtime::Runtime;
 
-use crate::app_state::AppState;
+use self::state::AppState;
 use crate::config::ConfigStore;
 use crate::connection::ConnectionManager;
 use crate::i18n::t;

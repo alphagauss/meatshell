@@ -20,7 +20,7 @@
 4. `src/ssh.rs` 和 `src/sftp.rs` 分别负责 SSH 终端会话和 SFTP 子系统，两者都在 Tokio 任务里跑；可选出站代理逻辑在 `src/proxy.rs`
 5. `src/system.rs` 提供本机侧资源采样，`src/i18n.rs` 负责运行时语言切换
 6. `build.rs` 负责编译 Slint UI、打包翻译文件，并在 Windows 上嵌入图标
-7. `src/app_state.rs` 保存少量跨组件 UI 布局状态，当前只覆盖侧边栏、底部面板显示和底部面板页签
+7. `src/app/state.rs` 保存少量跨组件 UI 布局状态，当前只覆盖侧边栏、底部面板显示和底部面板页签
 8. `src/connection.rs` 保存每个终端 tab 的连接运行态，统一包装 SSH session 的连接、断开、重连和状态
 9. `src/terminal/mod.rs` 是终端核心模块入口；`src/terminal/types.rs` / `src/terminal/engine.rs` 定义终端渲染数据、引擎模式和最小终端引擎 trait，`src/terminal/legacy.rs` 提供 legacy vt100 实现，`src/terminal/alacritty.rs` 提供可选实验 alacritty 引擎
 10. `src/file_transfer.rs`、`src/app/transfer.rs` 和 `ui/transfer_window.slint` 提供独立文件传输窗口第一版；远程侧复用 `src/sftp.rs` worker
@@ -28,7 +28,7 @@
 
 ## 2. 先看哪个文件
 
-- 改顶部工具栏、侧边栏/底部面板显隐、底部面板页签状态：先看 `src/app/layout.rs`、`src/app_state.rs`、`src/app/mod.rs`、`ui/app.slint` 和 `ui/terminal_view.slint`
+- 改顶部工具栏、侧边栏/底部面板显隐、底部面板页签状态：先看 `src/app/layout.rs`、`src/app/state.rs`、`src/app/mod.rs`、`ui/app.slint` 和 `ui/terminal_view.slint`
 - 改终端渲染数据或引擎边界：先看 `src/terminal/types.rs`、`src/terminal/engine.rs`、`src/terminal/alacritty.rs` 和 `src/terminal/legacy.rs`
 - 改终端按键、鼠标上报、resize、复制/粘贴、选区生命周期：先看 `src/app/terminal_input.rs` 和 `src/app/mod.rs`，再看 `ui/terminal_view.slint`
 - 改终端显示、选区、搜索、高亮、Tab 切换、回调绑定：先看 `src/app/terminal_render.rs`、`src/app/events.rs`、`src/app/models.rs`、`src/app/tabs.rs` 和 `src/app/mod.rs`，再看 `ui/app.slint` 和 `ui/terminal_view.slint`
@@ -53,12 +53,12 @@
 ### `src/app/mod.rs`
 职责：
 - 顶层 UI 状态机和 glue code
-- 初始化 `AppState`，并把默认布局状态同步到 Slint 窗口属性
+- 初始化 `src/app/state.rs` 里的 `AppState`，并把默认布局状态同步到 Slint 窗口属性
 - 通过 `ConnectionManager` 管理每个终端 tab 的 SSH runtime
 - 持有当前终端 wrapper，默认走 legacy vt100，引擎模式为 `MEATSHELL_TERMINAL_ENGINE=alacritty` 时委托到实验 alacritty 引擎
 - 维护 tabs / terminals / SFTP 状态
 - 把 Slint 回调路由到 SSH / SFTP / 配置 / 系统采样模块
-- 基础状态别名、平台 helper、layout / events / sidebar / session / tab / sftp panel / transfer / tunnel / terminal-input / terminal-render / model 的 UI glue 分别拆到 `src/app/types.rs`、`src/app/platform.rs`、`src/app/layout.rs`、`src/app/events.rs`、`src/app/sidebar.rs`、`src/app/sessions.rs`、`src/app/tabs.rs`、`src/app/sftp_panel.rs`、`src/app/transfer.rs`、`src/app/tunnels.rs`、`src/app/terminal_input.rs`、`src/app/terminal_render.rs` 和 `src/app/models.rs`；legacy vt100 引擎核心放在 `src/terminal/legacy.rs`
+- 基础状态布局、平台 helper、layout / events / sidebar / session / tab / sftp panel / transfer / tunnel / terminal-input / terminal-render / model 的 UI glue 分别拆到 `src/app/state.rs`、`src/app/types.rs`、`src/app/platform.rs`、`src/app/layout.rs`、`src/app/events.rs`、`src/app/sidebar.rs`、`src/app/sessions.rs`、`src/app/tabs.rs`、`src/app/sftp_panel.rs`、`src/app/transfer.rs`、`src/app/tunnels.rs`、`src/app/terminal_input.rs`、`src/app/terminal_render.rs` 和 `src/app/models.rs`；legacy vt100 引擎核心放在 `src/terminal/legacy.rs`
 
 关键符号：
 - `run()`
@@ -133,7 +133,7 @@
 ### `src/app/layout.rs`
 职责：
 - 保存窗口布局状态和底部面板的 UI glue
-- 把 `AppState` 同步到 Slint 窗口，并绑定侧边栏 / 底部面板的切换回调
+- 把 `src/app/state.rs` 里的 `AppState` 同步到 Slint 窗口，并绑定侧边栏 / 底部面板的切换回调
 
 关键符号：
 - `sync_app_state_to_window(...)`
@@ -244,7 +244,7 @@
 - `center_window(...)`
 - `cursor_pos(...)`
 
-### `src/app_state.rs`
+### `src/app/state.rs`
 职责：
 - 保存少量全局 UI 布局状态，避免继续把阶段 2 的工具栏/底部面板状态直接散落在 `src/app/mod.rs`
 - 当前只包含 `sidebar_visible`、`bottom_panel_visible`、`bottom_panel_tab`，以及对应的 toggle / tab select 方法

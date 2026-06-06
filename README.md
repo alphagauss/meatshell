@@ -159,16 +159,38 @@ meatshell/
 │   └── terminal_view.slint  # 终端视图（v0.1 行缓冲）
 └── src/
     ├── main.rs
-    ├── app.rs               # UI ↔ 后端桥接
+    ├── app/                 # UI 状态机与后端 glue
+    │   ├── mod.rs
+    │   ├── state.rs
+    │   ├── layout.rs
+    │   ├── events.rs
+    │   ├── models.rs
+    │   ├── platform.rs
+    │   ├── sessions.rs
+    │   ├── sidebar.rs
+    │   ├── sftp_panel.rs
+    │   ├── tabs.rs
+    │   ├── terminal_input.rs
+    │   ├── terminal_render.rs
+    │   ├── transfer.rs
+    │   ├── tunnels.rs
+    │   └── types.rs
     ├── connection.rs        # 连接运行态、断开、重连入口
     ├── config.rs            # 会话 JSON 持久化
     ├── file_transfer.rs     # 文件传输窗口本地目录 helper
-    ├── tunnel.rs            # Local Forward 隧道规则与后台转发任务
-    ├── terminal_alacritty.rs # alacritty 实验终端引擎
-    ├── terminal_engine.rs   # 终端引擎 trait
-    ├── terminal_types.rs    # 终端渲染数据类型
+    ├── i18n.rs              # 运行时语言切换
+    ├── proxy.rs             # SSH / SFTP 出站代理
+    ├── ssh.rs               # SSH 会话 worker
+    ├── ssh_config.rs        # 导入 ~/.ssh/config
+    ├── sftp.rs              # SFTP worker
     ├── system.rs            # CPU / 内存 / 网络采样
-    └── ssh.rs               # SSH 会话 worker
+    ├── tunnel.rs            # Local Forward 隧道规则与后台转发任务
+    └── terminal/
+        ├── mod.rs
+        ├── alacritty.rs     # alacritty 实验终端引擎
+        ├── engine.rs        # 终端引擎 trait
+        ├── legacy.rs        # legacy vt100 实现
+        └── types.rs         # 终端渲染数据类型
 ```
 
 ## 开发提示

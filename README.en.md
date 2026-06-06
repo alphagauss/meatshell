@@ -168,16 +168,38 @@ meatshell/
 │   └── terminal_view.slint  # terminal view (v0.1 line-buffered)
 └── src/
     ├── main.rs
-    ├── app.rs               # UI ↔ backend bridge
+    ├── app/                 # UI state machine and backend glue
+    │   ├── mod.rs
+    │   ├── state.rs
+    │   ├── layout.rs
+    │   ├── events.rs
+    │   ├── models.rs
+    │   ├── platform.rs
+    │   ├── sessions.rs
+    │   ├── sidebar.rs
+    │   ├── sftp_panel.rs
+    │   ├── tabs.rs
+    │   ├── terminal_input.rs
+    │   ├── terminal_render.rs
+    │   ├── transfer.rs
+    │   ├── tunnels.rs
+    │   └── types.rs
     ├── connection.rs        # connection runtime, disconnect, reconnect entry
     ├── config.rs            # session JSON persistence
     ├── file_transfer.rs     # transfer-window local directory helper
-    ├── tunnel.rs            # Local Forward tunnel rules and worker tasks
-    ├── terminal_alacritty.rs # experimental alacritty terminal engine
-    ├── terminal_engine.rs   # terminal engine trait
-    ├── terminal_types.rs    # terminal render data types
+    ├── i18n.rs              # runtime language switching
+    ├── proxy.rs             # SSH / SFTP outbound proxy
+    ├── ssh.rs               # SSH session worker
+    ├── ssh_config.rs        # import ~/.ssh/config
+    ├── sftp.rs              # SFTP worker
     ├── system.rs            # CPU / memory / network sampling
-    └── ssh.rs               # SSH session worker
+    ├── tunnel.rs            # Local Forward tunnel rules and worker tasks
+    └── terminal/
+        ├── mod.rs
+        ├── alacritty.rs     # experimental alacritty terminal engine
+        ├── engine.rs        # terminal engine trait
+        ├── legacy.rs        # legacy vt100 implementation
+        └── types.rs         # terminal render data types
 ```
 
 ## Development notes

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use slint::{ComponentHandle, SharedString};
 
-use crate::app_state::{AppState, BottomPanelTab};
+use super::state::{AppState, BottomPanelTab};
 
 use super::AppWindow;
 
