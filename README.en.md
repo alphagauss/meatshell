@@ -70,7 +70,7 @@ xattr -dr com.apple.quarantine meatshell     # clear the "unsigned app" Gatekeep
 
 ### v0.2
 
-- [ ] Full VT/ANSI terminal emulation (integrate [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal))
+- [ ] Full VT/ANSI terminal emulation (`alacritty_terminal` experimental engine is opt-in; mouse/TUI work remains for a later phase)
 - [ ] Remote host resource monitoring (run a remote collector script, like FinalShell)
 - [x] SFTP file browser + drag-and-drop upload/download
 - [x] Top toolbar shell: sidebar, bottom panel, disconnect, reconnect, transfer entry
@@ -92,6 +92,7 @@ xattr -dr com.apple.quarantine meatshell     # clear the "unsigned app" Gatekeep
 | UI            | [Slint](https://slint.dev) (compiled pure Rust, no GC)            |
 | Async runtime | [`tokio`](https://tokio.rs)                                       |
 | SSH protocol  | [`russh`](https://crates.io/crates/russh) (no libssh dependency)  |
+| Terminal parser | Legacy `vt100` by default; experimental [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) |
 | System metrics| [`sysinfo`](https://crates.io/crates/sysinfo)                     |
 | Serialization | `serde` + `serde_json`                                            |
 | Logging       | `tracing` + `tracing-subscriber`                                  |
@@ -100,6 +101,19 @@ xattr -dr com.apple.quarantine meatshell     # clear the "unsigned app" Gatekeep
 
 ```bash
 cargo run --release
+```
+
+The experimental alacritty terminal engine is disabled by default. Set an
+environment variable before launch to try it:
+
+```bash
+MEATSHELL_TERMINAL_ENGINE=alacritty cargo run --release
+```
+
+PowerShell:
+
+```powershell
+$env:MEATSHELL_TERMINAL_ENGINE = "alacritty"; cargo run --release
 ```
 
 On first launch an empty session store is created at
@@ -129,6 +143,7 @@ meatshell/
     ├── app.rs               # UI ↔ backend bridge
     ├── connection.rs        # connection runtime, disconnect, reconnect entry
     ├── config.rs            # session JSON persistence
+    ├── terminal_alacritty.rs # experimental alacritty terminal engine
     ├── terminal_engine.rs   # terminal engine trait
     ├── terminal_types.rs    # terminal render data types
     ├── system.rs            # CPU / memory / network sampling

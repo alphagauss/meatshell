@@ -22,12 +22,12 @@
 6. `build.rs` 负责编译 Slint UI、打包翻译文件，并在 Windows 上嵌入图标
 7. `src/app_state.rs` 保存少量跨组件 UI 布局状态，当前只覆盖侧边栏、底部面板显示和底部面板页签
 8. `src/connection.rs` 保存每个终端 tab 的连接运行态，统一包装 SSH session 的连接、断开、重连和状态
-9. `src/terminal_types.rs` / `src/terminal_engine.rs` 定义终端渲染数据和最小终端引擎 trait，当前由 legacy vt100 引擎实现
+9. `src/terminal_types.rs` / `src/terminal_engine.rs` 定义终端渲染数据、引擎模式和最小终端引擎 trait；`src/terminal_alacritty.rs` 提供可选实验 alacritty 引擎
 
 ## 2. 先看哪个文件
 
 - 改顶部工具栏、侧边栏/底部面板显隐、底部面板页签状态：先看 `src/app_state.rs`、`src/app.rs`、`ui/app.slint` 和 `ui/terminal_view.slint`
-- 改终端渲染数据或引擎边界：先看 `src/terminal_types.rs`、`src/terminal_engine.rs`，再看 `src/app.rs` 的 `LegacyTerminalEngine`
+- 改终端渲染数据或引擎边界：先看 `src/terminal_types.rs`、`src/terminal_engine.rs`、`src/terminal_alacritty.rs`，再看 `src/app.rs` 的 `LegacyTerminalEngine`
 - 改终端显示、选区、搜索、高亮、拖拽上传、Tab 切换、回调绑定：先看 `src/app.rs`，再看 `ui/app.slint` 和 `ui/terminal_view.slint`；终端缩窗后的回滚保留也在 `src/app.rs` 的 `wire_key_input(...)`
 - 改 SSH 连接运行态、断开、重连、连接状态入口：先看 `src/connection.rs`，再看 `src/app.rs` 和 `src/ssh.rs`
 - 改 SSH 认证、远端监控、OSC7 路径解析、出站代理：先看 `src/ssh.rs` 和 `src/proxy.rs`
@@ -45,7 +45,7 @@
 - 顶层 UI 状态机和 glue code
 - 初始化 `AppState`，并把默认布局状态同步到 Slint 窗口属性
 - 通过 `ConnectionManager` 管理每个终端 tab 的 SSH runtime
-- 持有当前 legacy vt100 终端引擎，并通过 `TerminalEngine` trait 调用 ingest/render/resize
+- 持有当前终端 wrapper，默认走 legacy vt100，引擎模式为 `MEATSHELL_TERMINAL_ENGINE=alacritty` 时委托到实验 alacritty 引擎
 - 维护 tabs / terminals / SFTP 状态
 - 处理终端渲染、搜索、选区、拖拽、侧边栏刷新
 - 把 Slint 回调路由到 SSH / SFTP / 配置 / 系统采样模块
@@ -93,6 +93,7 @@
 - `NetHist`
 
 `LegacyTerminalEngine` 里最重要的内部逻辑：
+- `new(...)`
 - `ingest(...)`
 - `rewrite_hvp(...)`
 - `ingest_chunk(...)`
@@ -128,20 +129,38 @@
 ### `src/terminal_types.rs`
 职责：
 - 保存终端渲染数据类型，避免把纯渲染模型继续定义在 `src/app.rs`
-- `BuiltScreen` 是泛型快照，`app.rs` 当前使用 `BuiltScreen<TermSpan>` 适配 Slint
+- `BuiltScreen` 是泛型快照，`RenderSpan` 是 Rust 侧中立渲染 run，`app.rs` 再转换成 Slint 的 `TermSpan`
 
 关键符号：
 - `BuiltScreen`
+- `RenderSpan`
 - `HistSpan`
 - `Line`
 
 ### `src/terminal_engine.rs`
 职责：
 - 定义最小 `TerminalEngine` trait
-- 当前 trait 由 `src/app.rs` 中的 `LegacyTerminalEngine` 实现，后续 alacritty 实验引擎复用这个边界
+- 定义 `TerminalEngineMode`，当前通过启动前环境变量 `MEATSHELL_TERMINAL_ENGINE=alacritty` 选择实验引擎，否则默认 legacy
+- trait 由 `src/app.rs` 中的 `LegacyTerminalEngine` wrapper 和 `src/terminal_alacritty.rs` 中的实验引擎实现
 
 关键符号：
+- `TerminalEngineMode`
 - `TerminalEngine`
+
+### `src/terminal_alacritty.rs`
+职责：
+- 包装 `alacritty_terminal`，实现实验终端引擎
+- 接收 SSH 输出 bytes，交给 alacritty parser 更新终端状态
+- 把 alacritty grid/cell 转换为 `BuiltScreen<RenderSpan>`，不把 alacritty 内部类型泄漏到 `app.rs` 或 Slint
+- 支持基础 resize；鼠标/TUI 交互增强留到阶段 6
+
+关键符号：
+- `AlacrittyTerminalEngine`
+- `AlacrittyDimensions`
+
+定位提示：
+- 实验引擎显示、颜色、宽字符或 resize 问题，先看这里
+- app 侧切换逻辑只看 `src/app.rs::LegacyTerminalEngine::new(...)` 和 `TerminalEngine` impl
 
 ### `src/ssh.rs`
 职责：

@@ -13,6 +13,7 @@ mod sftp;
 mod ssh;
 mod ssh_config;
 mod system;
+mod terminal_alacritty;
 mod terminal_engine;
 mod terminal_types;
 

@@ -7,6 +7,18 @@ pub struct BuiltScreen<Span> {
     pub is_alt: bool,
 }
 
+/// One coloured run positioned on the terminal grid.
+#[derive(Clone)]
+pub struct RenderSpan {
+    pub text: String,
+    pub fg: slint::Color,
+    pub bg: slint::Color,
+    pub bold: bool,
+    pub row: i32,
+    pub col: i32,
+    pub cells: i32,
+}
+
 /// One coloured run within a line; its grid row is assigned at render time.
 #[derive(Clone)]
 pub struct HistSpan {

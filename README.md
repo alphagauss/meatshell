@@ -66,7 +66,7 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 
 ### v0.2
 
-- [ ] 完整 VT/ANSI 终端模拟（接入 [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal)）
+- [ ] 完整 VT/ANSI 终端模拟（`alacritty_terminal` 实验引擎已可选启用，鼠标/TUI 仍在后续阶段）
 - [ ] 远端主机资源监控（与 FinalShell 一样执行远端脚本收集）
 - [x] SFTP 文件浏览 + 拖拽上传/下载
 - [x] 顶部工具栏骨架：侧边栏、底部面板、断开、重连、文件传输入口
@@ -88,6 +88,7 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 | UI            | [Slint](https://slint.dev)（纯 Rust 编译，无 GC）                 |
 | 异步运行时    | [`tokio`](https://tokio.rs)                                       |
 | SSH 协议      | [`russh`](https://crates.io/crates/russh)（无 libssh 依赖）       |
+| 终端解析      | 默认 legacy `vt100`；实验 [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) |
 | 系统指标      | [`sysinfo`](https://crates.io/crates/sysinfo)                     |
 | 序列化        | `serde` + `serde_json`                                            |
 | 日志          | `tracing` + `tracing-subscriber`                                  |
@@ -96,6 +97,18 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 
 ```bash
 cargo run --release
+```
+
+实验性的 alacritty 终端引擎默认不启用；需要启动前设置环境变量：
+
+```bash
+MEATSHELL_TERMINAL_ENGINE=alacritty cargo run --release
+```
+
+PowerShell：
+
+```powershell
+$env:MEATSHELL_TERMINAL_ENGINE = "alacritty"; cargo run --release
 ```
 
 首次启动会在 `%APPDATA%/meatshell/sessions.json` 建立空的会话库。点击右上
@@ -124,6 +137,7 @@ meatshell/
     ├── app.rs               # UI ↔ 后端桥接
     ├── connection.rs        # 连接运行态、断开、重连入口
     ├── config.rs            # 会话 JSON 持久化
+    ├── terminal_alacritty.rs # alacritty 实验终端引擎
     ├── terminal_engine.rs   # 终端引擎 trait
     ├── terminal_types.rs    # 终端渲染数据类型
     ├── system.rs            # CPU / 内存 / 网络采样

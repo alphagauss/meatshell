@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 /// text; vt100 tracks cursor position and overwrites in place correctly.
 struct LegacyTerminalEngine {
     parser: vt100::Parser,
+    alacritty: Option<AlacrittyTerminalEngine>,
     /// Active find query for this tab ("" = no search).
     find_query: String,
     /// Drag selection (start_row, start_col, end_row, end_col) in grid cells.
@@ -66,8 +67,9 @@ use crate::i18n::t;
 use crate::sftp::{spawn_sftp, SftpHandle};
 use crate::ssh::{format_mtime, format_size, SessionEvent};
 use crate::system::{format_bytes_per_sec, SystemSampler, SystemSnapshot};
-use crate::terminal_engine::TerminalEngine;
-use crate::terminal_types::{BuiltScreen, HistSpan, Line};
+use crate::terminal_alacritty::AlacrittyTerminalEngine;
+use crate::terminal_engine::{TerminalEngine, TerminalEngineMode};
+use crate::terminal_types::{BuiltScreen, HistSpan, Line, RenderSpan};
 
 type SftpHandles = Arc<Mutex<HashMap<String, SftpHandle>>>;
 type ConnectionStore = Arc<Mutex<ConnectionManager>>;
@@ -116,6 +118,8 @@ pub fn run() -> Result<()> {
 
     // Per-tab terminal connection runtimes.
     let connections: ConnectionStore = Arc::new(Mutex::new(ConnectionManager::new()));
+    let terminal_engine_mode = TerminalEngineMode::from_env();
+    tracing::info!("terminal engine mode: {}", terminal_engine_mode.as_str());
 
     // Per-tab SFTP handles — Arc<Mutex> so the event-pump OS thread and the
     // Slint UI thread can both post SftpCommands.
@@ -199,6 +203,7 @@ pub fn run() -> Result<()> {
         bufs.clone(),
         runtime.clone(),
         last_term_size.clone(),
+        terminal_engine_mode,
         sftp_handles.clone(),
         sftp_manual_nav.clone(),
         tab_statuses.clone(),
@@ -946,6 +951,7 @@ fn wire_session_callbacks(
     bufs: TermBuffers,
     runtime: Arc<Runtime>,
     last_term_size: Arc<Mutex<(u32, u32)>>,
+    terminal_engine_mode: TerminalEngineMode,
     sftp_handles: SftpHandles,
     sftp_manual_nav: SftpManualNav,
     tab_statuses: TabStatuses,
@@ -1239,16 +1245,7 @@ fn wire_session_callbacks(
             // future scroll-navigation support.
             bufs.lock().unwrap().insert(
                 tab_id.clone(),
-                TermBuffer {
-                    parser: vt100::Parser::new(24, 80, 5000),
-                    find_query: String::new(),
-                    sel: None,
-                    history: Vec::new(),
-                    prev: Vec::new(),
-                    view_offset: 0,
-                    displayed_text: Vec::new(),
-                    csi_state: CsiState::Normal,
-                },
+                TermBuffer::new(24, 80, 5000, terminal_engine_mode),
             );
             // Start in cd-auto-follow mode (flag = false → follow cd).
             sftp_manual_nav
@@ -1471,6 +1468,22 @@ fn extract_selection(rows: &[String], sr: u16, sc: u16, er: u16, ec: u16) -> Str
     out
 }
 
+fn term_spans_model(spans: Vec<RenderSpan>) -> ModelRc<TermSpan> {
+    let rows: Vec<TermSpan> = spans
+        .into_iter()
+        .map(|span| TermSpan {
+            text: span.text.into(),
+            fg: span.fg,
+            bg: span.bg,
+            bold: span.bold,
+            row: span.row,
+            col: span.col,
+            cells: span.cells,
+        })
+        .collect();
+    ModelRc::from(Rc::new(VecModel::from(rows)))
+}
+
 /// Recompute spans + cursor + find/selection highlights for one tab from its
 /// current vt100 screen (respecting scrollback) and push them to the model.
 /// Used by scroll + selection callbacks (Output has its own equivalent inline).
@@ -1490,7 +1503,7 @@ fn rebuild_tab_display(win: &AppWindow, bufs: &TermBuffers, tab_id: &str) {
         (b, matches, sel)
     };
     let (b, matches, sel) = data;
-    let spans = ModelRc::from(Rc::new(VecModel::from(b.spans)));
+    let spans = term_spans_model(b.spans);
     let fm = ModelRc::from(Rc::new(VecModel::from(matches)));
     let sm = ModelRc::from(Rc::new(VecModel::from(sel)));
     let (cr, cc, ru, alt) = (b.cursor_row, b.cursor_col, b.rows_used, b.is_alt);
@@ -1700,8 +1713,7 @@ fn apply_session_event_to_window(
                 }
             };
             if let Some((b, matches, sel)) = built {
-                let spans_model: ModelRc<TermSpan> =
-                    ModelRc::from(std::rc::Rc::new(VecModel::from(b.spans)));
+                let spans_model: ModelRc<TermSpan> = term_spans_model(b.spans);
                 let matches_model: ModelRc<TermMatch> =
                     ModelRc::from(std::rc::Rc::new(VecModel::from(matches)));
                 let sel_model: ModelRc<TermMatch> =
@@ -2490,12 +2502,16 @@ fn wire_key_input(
             if let Some(buf) = bufs_clear.lock().unwrap().get_mut(&tid) {
                 let (rows, cols) = buf.parser.screen().size();
                 buf.parser = vt100::Parser::new(rows, cols, 5000);
+                if buf.alacritty.is_some() {
+                    buf.alacritty = Some(AlacrittyTerminalEngine::new(rows, cols));
+                }
                 buf.find_query.clear();
                 buf.history = Vec::new(); // recycle the session scrollback
                 buf.prev = Vec::new();
                 buf.view_offset = 0;
                 buf.sel = None;
                 buf.displayed_text = Vec::new();
+                buf.csi_state = CsiState::Normal;
             }
             if let Some(win) = weak.upgrade() {
                 set_terminal_row(&win, &tid, |row| {
@@ -2953,6 +2969,25 @@ fn detect_scroll(prev: &[Line], curr: &[Line]) -> usize {
 }
 
 impl LegacyTerminalEngine {
+    fn new(rows: u16, cols: u16, scrollback: usize, mode: TerminalEngineMode) -> Self {
+        Self {
+            parser: vt100::Parser::new(rows, cols, scrollback),
+            alacritty: match mode {
+                TerminalEngineMode::Legacy => None,
+                TerminalEngineMode::AlacrittyExperimental => {
+                    Some(AlacrittyTerminalEngine::new(rows, cols))
+                }
+            },
+            find_query: String::new(),
+            sel: None,
+            history: Vec::new(),
+            prev: Vec::new(),
+            view_offset: 0,
+            displayed_text: Vec::new(),
+            csi_state: CsiState::Normal,
+        }
+    }
+
     /// Feed bytes to vt100 and capture scrolled-off lines into history.
     ///
     /// We detect scroll by diffing the screen before/after a `process`, which
@@ -3082,7 +3117,7 @@ impl LegacyTerminalEngine {
 
     /// Render the terminal grid for the current scrollback `view_offset`
     /// (0 = live).  Caches the displayed plain text for find/selection.
-    fn render(&mut self) -> BuiltScreen<TermSpan> {
+    fn render(&mut self) -> BuiltScreen<RenderSpan> {
         let (is_alt, rows, cols, cur_row, cur_col) = {
             let s = self.parser.screen();
             let (r, c) = s.size();
@@ -3102,8 +3137,8 @@ impl LegacyTerminalEngine {
                     last_content = r as i32;
                 }
                 for hs in runs {
-                    spans.push(TermSpan {
-                        text: hs.text.into(),
+                    spans.push(RenderSpan {
+                        text: hs.text,
                         fg: hs.fg,
                         bg: hs.bg,
                         bold: hs.bold,
@@ -3154,8 +3189,8 @@ impl LegacyTerminalEngine {
                 &live[idx - hist_len]
             };
             for hs in &line.1 {
-                spans.push(TermSpan {
-                    text: hs.text.clone().into(),
+                spans.push(RenderSpan {
+                    text: hs.text.clone(),
                     fg: hs.fg,
                     bg: hs.bg,
                     bold: hs.bold,
@@ -3181,18 +3216,31 @@ impl LegacyTerminalEngine {
 }
 
 impl TerminalEngine for LegacyTerminalEngine {
-    type Screen = BuiltScreen<TermSpan>;
+    type Screen = BuiltScreen<RenderSpan>;
 
     fn ingest(&mut self, bytes: &[u8]) {
-        LegacyTerminalEngine::ingest(self, bytes);
+        if let Some(engine) = self.alacritty.as_mut() {
+            TerminalEngine::ingest(engine, bytes);
+        } else {
+            LegacyTerminalEngine::ingest(self, bytes);
+        }
     }
 
     fn render(&mut self) -> Self::Screen {
-        LegacyTerminalEngine::render(self)
+        if let Some(engine) = self.alacritty.as_mut() {
+            let screen = TerminalEngine::render(engine);
+            self.displayed_text = engine.displayed_text().to_vec();
+            screen
+        } else {
+            LegacyTerminalEngine::render(self)
+        }
     }
 
     fn resize(&mut self, rows: u16, cols: u16) {
         self.parser.set_size(rows, cols);
+        if let Some(engine) = self.alacritty.as_mut() {
+            TerminalEngine::resize(engine, rows, cols);
+        }
     }
 }
 
