@@ -71,9 +71,11 @@ use crate::system::{format_bytes_per_sec, SystemSampler, SystemSnapshot};
 use crate::terminal_alacritty::AlacrittyTerminalEngine;
 use crate::terminal_engine::{TerminalEngine, TerminalEngineMode};
 use crate::terminal_types::{BuiltScreen, HistSpan, Line, RenderSpan};
+use crate::tunnel::{TunnelEvent, TunnelManager, TunnelView};
 
 type SftpHandles = Arc<Mutex<HashMap<String, SftpHandle>>>;
 type ConnectionStore = Arc<Mutex<ConnectionManager>>;
+type TunnelStore = Arc<Mutex<TunnelManager>>;
 type TermBuffer = LegacyTerminalEngine;
 /// Per-tab flag: once the user explicitly navigates via the SFTP tree or
 /// toolbar, stop auto-syncing to the terminal's `cd` path.
@@ -126,6 +128,10 @@ pub fn run() -> Result<()> {
 
     // Per-tab terminal connection runtimes.
     let connections: ConnectionStore = Arc::new(Mutex::new(ConnectionManager::new()));
+    let (tunnel_tx, tunnel_rx) = tokio::sync::mpsc::unbounded_channel::<TunnelEvent>();
+    let tunnels: TunnelStore = Arc::new(Mutex::new(
+        TunnelManager::load(tunnel_tx).context("failed to load tunnel config")?,
+    ));
     let terminal_engine_mode = TerminalEngineMode::from_env();
     tracing::info!("terminal engine mode: {}", terminal_engine_mode.as_str());
 
@@ -179,6 +185,9 @@ pub fn run() -> Result<()> {
 
     let terminals_model: Rc<VecModel<TerminalState>> = Rc::new(VecModel::default());
     window.set_terminals(ModelRc::from(terminals_model.clone()));
+    window.set_tunnel_rules(ModelRc::from(
+        Rc::new(VecModel::<TunnelRuleInfo>::default()),
+    ));
 
     // Per-tab connection status + remote resources, the latest local sample,
     // and the local machine's network history (bottom sparkline).
@@ -203,6 +212,7 @@ pub fn run() -> Result<()> {
         local_snap.clone(),
         local_net_hist.clone(),
         transfer_windows.clone(),
+        tunnels.clone(),
     );
     wire_session_callbacks(
         &window,
@@ -220,6 +230,7 @@ pub fn run() -> Result<()> {
         tab_statuses.clone(),
         local_snap.clone(),
         local_net_hist.clone(),
+        tunnels.clone(),
     );
 
     // Recompute the sidebar whenever the active tab changes (fired from Slint's
@@ -229,9 +240,12 @@ pub fn run() -> Result<()> {
         let statuses = tab_statuses.clone();
         let local = local_snap.clone();
         let net = local_net_hist.clone();
+        let connections = connections.clone();
+        let tunnels = tunnels.clone();
         window.on_refresh_sidebar(move || {
             if let Some(w) = weak.upgrade() {
                 refresh_sidebar(&w, &statuses, &local, &net);
+                refresh_tunnel_panel(&w, &connections, &tunnels);
             }
         });
     }
@@ -395,13 +409,26 @@ pub fn run() -> Result<()> {
         bufs.clone(),
         sftp_handles.clone(),
         sftp_manual_nav.clone(),
+        tunnels.clone(),
     );
     wire_sftp_callbacks(&window, sftp_handles.clone(), sftp_manual_nav.clone());
+    wire_tunnel_callbacks(
+        &window,
+        connections.clone(),
+        tunnels.clone(),
+        runtime.clone(),
+    );
     wire_key_input(
         &window,
         connections.clone(),
         bufs.clone(),
         last_term_size.clone(),
+    );
+    spawn_tunnel_event_pump(
+        window.as_weak(),
+        tunnel_rx,
+        connections.clone(),
+        tunnels.clone(),
     );
 
     // --- System sampler (1 Hz) ------------------------------------------
@@ -531,6 +558,7 @@ fn wire_app_state_callbacks(
     local_snap: LocalSnap,
     local_net_hist: NetHist,
     transfer_windows: TransferWindows,
+    tunnels: TunnelStore,
 ) {
     {
         let weak = window.as_weak();
@@ -573,6 +601,7 @@ fn wire_app_state_callbacks(
         let tabs_model = tabs_model.clone();
         let connections = connections.clone();
         let sftp_handles = sftp_handles.clone();
+        let tunnels = tunnels.clone();
         let tab_statuses = tab_statuses.clone();
         let local_snap = local_snap.clone();
         let local_net_hist = local_net_hist.clone();
@@ -583,6 +612,9 @@ fn wire_app_state_callbacks(
                 return;
             }
 
+            if let Some(session) = connections.lock().unwrap().session(&active) {
+                tunnels.lock().unwrap().stop_for_session(&session.id);
+            }
             connections.lock().unwrap().disconnect(&active);
             if let Some(sftp) = sftp_handles.lock().unwrap().remove(&active) {
                 sftp.close();
@@ -603,6 +635,7 @@ fn wire_app_state_callbacks(
                 row.status = t("已断开", "Disconnected").into();
             });
             refresh_sidebar(&w, &tab_statuses, &local_snap, &local_net_hist);
+            refresh_tunnel_panel(&w, &connections, &tunnels);
         });
     }
 
@@ -618,6 +651,7 @@ fn wire_app_state_callbacks(
         let local_snap = local_snap.clone();
         let local_net_hist = local_net_hist.clone();
         let tabs_model = tabs_model.clone();
+        let tunnels = tunnels.clone();
         window.on_reconnect_active_tab(move || {
             let Some(w) = weak.upgrade() else { return };
             let active = w.get_active_tab_id().to_string();
@@ -634,6 +668,7 @@ fn wire_app_state_callbacks(
                 });
                 return;
             };
+            tunnels.lock().unwrap().stop_for_session(&session.id);
             if let Some(sftp) = sftp_handles.lock().unwrap().remove(&active) {
                 sftp.close();
             }
@@ -673,6 +708,7 @@ fn wire_app_state_callbacks(
                 row.sftp_loading = true;
             });
             refresh_sidebar(&w, &tab_statuses, &local_snap, &local_net_hist);
+            refresh_tunnel_panel(&w, &connections, &tunnels);
 
             let (sftp_tx, sftp_rx) = tokio::sync::mpsc::unbounded_channel::<SessionEvent>();
             let sftp_handle = spawn_sftp(runtime.handle(), session, sftp_tx);
@@ -693,6 +729,7 @@ fn wire_app_state_callbacks(
                 tab_statuses.clone(),
                 local_snap.clone(),
                 local_net_hist.clone(),
+                tunnels.clone(),
             );
             spawn_sftp_event_pump(
                 weak.clone(),
@@ -995,6 +1032,7 @@ fn spawn_shell_event_pump(
     tab_statuses: TabStatuses,
     local_snap: LocalSnap,
     local_net_hist: NetHist,
+    tunnels: TunnelStore,
 ) {
     std::thread::spawn(move || {
         let mut shell_rx = events;
@@ -1010,16 +1048,35 @@ fn spawn_shell_event_pump(
                     {
                         break;
                     }
+                    let tunnel_session = match &shell_evt {
+                        SessionEvent::Connected | SessionEvent::Closed(_) => {
+                            connections.lock().unwrap().session(&tab_id)
+                        }
+                        _ => None,
+                    };
                     match &shell_evt {
-                        SessionEvent::Connected => connections
-                            .lock()
-                            .unwrap()
-                            .mark_connected(&tab_id, generation),
-                        SessionEvent::Closed(reason) => connections.lock().unwrap().mark_closed(
-                            &tab_id,
-                            generation,
-                            reason.clone(),
-                        ),
+                        SessionEvent::Connected => {
+                            connections
+                                .lock()
+                                .unwrap()
+                                .mark_connected(&tab_id, generation);
+                            if let Some(session) = tunnel_session.clone() {
+                                tunnels
+                                    .lock()
+                                    .unwrap()
+                                    .start_enabled_for_session(runtime.handle(), session);
+                            }
+                        }
+                        SessionEvent::Closed(reason) => {
+                            if let Some(session) = tunnel_session {
+                                tunnels.lock().unwrap().stop_for_session(&session.id);
+                            }
+                            connections.lock().unwrap().mark_closed(
+                                &tab_id,
+                                generation,
+                                reason.clone(),
+                            );
+                        }
                         _ => {}
                     }
 
@@ -1052,11 +1109,14 @@ fn spawn_shell_event_pump(
                     let st_evt = tab_statuses.clone();
                     let lc_evt = local_snap.clone();
                     let nh_evt = local_net_hist.clone();
+                    let conn_evt = connections.clone();
+                    let tunnels_evt = tunnels.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(win) = weak_evt.upgrade() {
                             apply_session_event_to_window(
                                 &win, &tid, shell_evt, &bufs_evt, &st_evt, &lc_evt, &nh_evt,
                             );
+                            refresh_tunnel_panel(&win, &conn_evt, &tunnels_evt);
                         }
                     });
                 }
@@ -1097,6 +1157,180 @@ fn spawn_sftp_event_pump(
             }
         }
     });
+}
+
+fn spawn_tunnel_event_pump(
+    weak: slint::Weak<AppWindow>,
+    events: UnboundedReceiver<TunnelEvent>,
+    connections: ConnectionStore,
+    tunnels: TunnelStore,
+) {
+    std::thread::spawn(move || {
+        let mut rx = events;
+        while let Some(event) = rx.blocking_recv() {
+            tunnels.lock().unwrap().apply_event(&event);
+            let weak_evt = weak.clone();
+            let connections_evt = connections.clone();
+            let tunnels_evt = tunnels.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(win) = weak_evt.upgrade() {
+                    refresh_tunnel_panel(&win, &connections_evt, &tunnels_evt);
+                }
+            });
+        }
+    });
+}
+
+fn wire_tunnel_callbacks(
+    window: &AppWindow,
+    connections: ConnectionStore,
+    tunnels: TunnelStore,
+    runtime: Arc<Runtime>,
+) {
+    {
+        let weak = window.as_weak();
+        let connections = connections.clone();
+        let tunnels = tunnels.clone();
+        window.on_tunnel_add_rule(move || {
+            let Some(w) = weak.upgrade() else { return };
+            let active = w.get_active_tab_id().to_string();
+            let Some(session) = connections.lock().unwrap().session(&active) else {
+                set_terminal_row(&w, &active, |row| {
+                    row.status = t("没有可用的隧道会话", "No session available for tunnels").into();
+                });
+                return;
+            };
+            let result = tunnels.lock().unwrap().add_rule(&session.id);
+            if let Err(err) = result {
+                set_terminal_row(&w, &active, |row| {
+                    row.status =
+                        format!("{}: {err:#}", t("新增隧道失败", "Add tunnel failed")).into();
+                });
+            }
+            refresh_tunnel_panel(&w, &connections, &tunnels);
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let connections = connections.clone();
+        let tunnels = tunnels.clone();
+        let runtime = runtime.clone();
+        window.on_tunnel_update_rule(
+            move |id, name, local_host, local_port, remote_host, remote_port| {
+                let Some(w) = weak.upgrade() else { return };
+                let active = w.get_active_tab_id().to_string();
+                let result = tunnels.lock().unwrap().update_rule(
+                    &id.to_string(),
+                    name.to_string(),
+                    local_host.to_string(),
+                    local_port.to_string(),
+                    remote_host.to_string(),
+                    remote_port.to_string(),
+                );
+                match result {
+                    Ok(Some(rule)) => {
+                        if rule.enabled {
+                            if let Some(session) = connections.lock().unwrap().session(&active) {
+                                tunnels
+                                    .lock()
+                                    .unwrap()
+                                    .start_rule(runtime.handle(), session, rule);
+                            }
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        set_terminal_row(&w, &active, |row| {
+                            row.status =
+                                format!("{}: {err:#}", t("保存隧道失败", "Save tunnel failed"))
+                                    .into();
+                        });
+                    }
+                }
+                refresh_tunnel_panel(&w, &connections, &tunnels);
+            },
+        );
+    }
+
+    {
+        let weak = window.as_weak();
+        let connections = connections.clone();
+        let tunnels = tunnels.clone();
+        let runtime = runtime.clone();
+        window.on_tunnel_toggle_rule(move |id, enabled| {
+            let Some(w) = weak.upgrade() else { return };
+            let active = w.get_active_tab_id().to_string();
+            let result = tunnels
+                .lock()
+                .unwrap()
+                .set_enabled(&id.to_string(), enabled);
+            match result {
+                Ok(Some(rule)) => {
+                    if enabled {
+                        if let Some(session) = connections.lock().unwrap().session(&active) {
+                            tunnels
+                                .lock()
+                                .unwrap()
+                                .start_rule(runtime.handle(), session, rule);
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    set_terminal_row(&w, &active, |row| {
+                        row.status =
+                            format!("{}: {err:#}", t("更新隧道失败", "Update tunnel failed"))
+                                .into();
+                    });
+                }
+            }
+            refresh_tunnel_panel(&w, &connections, &tunnels);
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let connections = connections.clone();
+        let tunnels = tunnels.clone();
+        window.on_tunnel_delete_rule(move |id| {
+            let Some(w) = weak.upgrade() else { return };
+            let active = w.get_active_tab_id().to_string();
+            if let Err(err) = tunnels.lock().unwrap().delete_rule(&id.to_string()) {
+                set_terminal_row(&w, &active, |row| {
+                    row.status =
+                        format!("{}: {err:#}", t("删除隧道失败", "Delete tunnel failed")).into();
+                });
+            }
+            refresh_tunnel_panel(&w, &connections, &tunnels);
+        });
+    }
+}
+
+fn refresh_tunnel_panel(win: &AppWindow, connections: &ConnectionStore, tunnels: &TunnelStore) {
+    let active = win.get_active_tab_id().to_string();
+    let views = connections
+        .lock()
+        .unwrap()
+        .session(&active)
+        .map(|session| tunnels.lock().unwrap().views_for_session(&session.id))
+        .unwrap_or_default();
+    let rows: Vec<TunnelRuleInfo> = views.into_iter().map(tunnel_view_to_info).collect();
+    win.set_tunnel_rules(ModelRc::from(Rc::new(VecModel::from(rows))));
+}
+
+fn tunnel_view_to_info(view: TunnelView) -> TunnelRuleInfo {
+    TunnelRuleInfo {
+        id: view.id.into(),
+        name: view.name.into(),
+        enabled: view.enabled,
+        local_host: view.local_host.into(),
+        local_port: view.local_port.into(),
+        remote_host: view.remote_host.into(),
+        remote_port: view.remote_port.into(),
+        status: view.status_text.into(),
+        status_kind: view.status_kind,
+    }
 }
 
 /// The active terminal tab's current SFTP directory ("" if unknown).
@@ -1226,6 +1460,7 @@ fn wire_session_callbacks(
     tab_statuses: TabStatuses,
     local_snap: LocalSnap,
     local_net_hist: NetHist,
+    tunnels: TunnelStore,
 ) {
     // New session -> open dialog with blank draft.
     let weak = window.as_weak();
@@ -1463,6 +1698,7 @@ fn wire_session_callbacks(
         let tab_statuses = tab_statuses.clone();
         let local_snap = local_snap.clone();
         let local_net_hist = local_net_hist.clone();
+        let tunnels = tunnels.clone();
         window.on_connect_session(move |id: SharedString| {
             let id = id.to_string();
             let session = match store.borrow().get(&id).cloned() {
@@ -1577,6 +1813,7 @@ fn wire_session_callbacks(
                 tab_statuses.clone(),
                 local_snap.clone(),
                 local_net_hist.clone(),
+                tunnels.clone(),
             );
 
             spawn_sftp_event_pump(
@@ -2201,6 +2438,7 @@ fn wire_tab_callbacks(
     bufs: TermBuffers,
     sftp_handles: SftpHandles,
     sftp_manual_nav: SftpManualNav,
+    tunnels: TunnelStore,
 ) {
     // Selecting a tab is already applied inside the Slint callback; we just
     // need to keep the C++/Rust state in sync if needed.
@@ -2218,10 +2456,14 @@ fn wire_tab_callbacks(
         let bufs = bufs.clone();
         let sftp_handles = sftp_handles.clone();
         let sftp_manual_nav = sftp_manual_nav.clone();
+        let tunnels = tunnels.clone();
         window.on_tab_closed(move |id: SharedString| {
             let id = id.to_string();
             if id == "welcome" {
                 return;
+            }
+            if let Some(session) = connections.lock().unwrap().session(&id) {
+                tunnels.lock().unwrap().stop_for_session(&session.id);
             }
             connections.lock().unwrap().remove(&id);
             if let Some(sftp) = sftp_handles.lock().unwrap().remove(&id) {
@@ -2265,6 +2507,7 @@ fn wire_tab_callbacks(
                 if w.get_active_tab_id().as_str() == id {
                     w.set_active_tab_id("welcome".into());
                 }
+                refresh_tunnel_panel(&w, &connections, &tunnels);
             }
         });
     }

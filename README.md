@@ -73,6 +73,7 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 - [x] 底部“文件 / 隧道”页签骨架（文件页继续使用 SFTP 面板）
 - [x] alacritty 实验引擎的基础 SGR 鼠标上报（左键、释放、滚轮）
 - [x] 独立文件传输窗口第一版（本地/远程双栏、基础上传下载）
+- [x] 隧道 Local Forward 第一版（session 关联、启用后自动启动、独立 `tunnels.json`）
 - [ ] 已知主机 (known_hosts) 校验
 - [ ] 会话密码使用 OS 钥匙串存储
 
@@ -91,6 +92,7 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 | 异步运行时    | [`tokio`](https://tokio.rs)                                       |
 | SSH 协议      | [`russh`](https://crates.io/crates/russh)（无 libssh 依赖）       |
 | 终端解析      | 默认 legacy `vt100`；实验 [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) |
+| 隧道转发      | `russh` direct-tcpip + `tokio` TCP 转发                         |
 | 系统指标      | [`sysinfo`](https://crates.io/crates/sysinfo)                     |
 | 序列化        | `serde` + `serde_json`                                            |
 | 日志          | `tracing` + `tracing-subscriber`                                  |
@@ -116,6 +118,11 @@ $env:MEATSHELL_TERMINAL_ENGINE = "alacritty"; cargo run --release
 首次启动会在 `%APPDATA%/meatshell/sessions.json` 建立空的会话库。点击右上
 角 **“＋ 新建会话”** 添加第一台服务器。
 
+底部面板的 **“隧道”** 页签支持第一版 Local Forward：新增规则后填写
+`本地地址:端口 -> 远端地址:端口`，保存并启用；该 session 下 enabled 规则会在
+终端连接成功后自动启动，断开或关闭 tab 时停止。规则单独保存到
+`tunnels.json`，不写入 `sessions.json`。
+
 ## 项目布局
 
 ```
@@ -130,7 +137,7 @@ meatshell/
 │   ├── tabs.slint           # 顶部标签栏
 │   ├── top_action_bar.slint # 标签页下方工具栏
 │   ├── bottom_panel.slint   # 底部文件 / 隧道页签外壳
-│   ├── tunnel_panel.slint   # 隧道页签空状态
+│   ├── tunnel_panel.slint   # Local Forward 隧道规则面板
 │   ├── transfer_window.slint # 独立文件传输窗口
 │   ├── local_file_panel.slint # 文件传输本地面板
 │   ├── remote_file_panel.slint # 文件传输远程面板
@@ -143,6 +150,7 @@ meatshell/
     ├── connection.rs        # 连接运行态、断开、重连入口
     ├── config.rs            # 会话 JSON 持久化
     ├── file_transfer.rs     # 文件传输窗口本地目录 helper
+    ├── tunnel.rs            # Local Forward 隧道规则与后台转发任务
     ├── terminal_alacritty.rs # alacritty 实验终端引擎
     ├── terminal_engine.rs   # 终端引擎 trait
     ├── terminal_types.rs    # 终端渲染数据类型

@@ -1,17 +1,233 @@
 import { Theme } from "theme.slint";
 
+export struct TunnelRuleInfo {
+    id: string,
+    name: string,
+    enabled: bool,
+    local-host: string,
+    local-port: string,
+    remote-host: string,
+    remote-port: string,
+    status: string,
+    status-kind: int,
+}
+
+component SmallButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    callback clicked();
+
+    height: 26px;
+    min-width: 58px;
+    border-radius: Theme.radius-sm;
+    border-width: primary ? 0px : 1px;
+    border-color: danger ? Theme.danger : Theme.border-subtle;
+    background: primary
+        ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
+        : (touch.has-hover ? Theme.bg-hover : Theme.bg-elevated);
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.text;
+        color: root.primary ? #ffffff : (root.danger ? Theme.danger : Theme.text-primary);
+        font-size: Theme.fs-sm;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component Field inherits Rectangle {
+    in property <string> placeholder;
+    in-out property <string> value;
+
+    height: 26px;
+    border-radius: Theme.radius-sm;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.border-subtle;
+    background: Theme.bg-root;
+
+    input := TextInput {
+        x: 7px;
+        y: 0px;
+        width: parent.width - 14px;
+        height: parent.height;
+        text <=> root.value;
+        color: Theme.text-primary;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+        single-line: true;
+    }
+
+    if root.value == "" : Text {
+        x: 7px;
+        width: parent.width - 14px;
+        height: parent.height;
+        text: root.placeholder;
+        color: Theme.text-muted;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
 export component TunnelPanel inherits Rectangle {
+    in property <[TunnelRuleInfo]> rules: [];
+
+    callback add-rule();
+    callback update-rule(string, string, string, string, string, string);
+    callback toggle-rule(string, bool);
+    callback delete-rule(string);
+
     background: Theme.bg-panel;
 
     VerticalLayout {
-        alignment: center;
-        padding: 16px;
+        padding: 10px;
+        spacing: 8px;
 
-        Text {
-            text: @tr("Tunnel rules will appear here.");
-            color: Theme.text-muted;
-            font-size: Theme.fs-md;
-            horizontal-alignment: center;
+        HorizontalLayout {
+            height: 28px;
+            spacing: 8px;
+
+            Text {
+                text: @tr("Local forward rules");
+                color: Theme.text-primary;
+                font-size: Theme.fs-md;
+                font-weight: 600;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            SmallButton {
+                text: @tr("Add");
+                primary: true;
+                clicked => { root.add-rule(); }
+            }
+        }
+
+        if root.rules.length == 0 : Rectangle {
+            vertical-stretch: 1;
+            Text {
+                text: @tr("No tunnel rules for this session.");
+                color: Theme.text-muted;
+                font-size: Theme.fs-md;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        if root.rules.length > 0 : Flickable {
+            vertical-stretch: 1;
+            viewport-width: self.width;
+            viewport-height: max(self.height, rule-col.preferred-height);
+
+            rule-col := VerticalLayout {
+                spacing: 8px;
+                alignment: start;
+
+                for rule in root.rules : Rectangle {
+                    property <string> edit-name: rule.name;
+                    property <string> edit-local-host: rule.local-host;
+                    property <string> edit-local-port: rule.local-port;
+                    property <string> edit-remote-host: rule.remote-host;
+                    property <string> edit-remote-port: rule.remote-port;
+
+                    height: 116px;
+                    border-radius: Theme.radius-sm;
+                    border-width: 1px;
+                    border-color: Theme.border-subtle;
+                    background: Theme.bg-root;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 7px;
+
+                        HorizontalLayout {
+                            spacing: 8px;
+
+                            Field {
+                                horizontal-stretch: 1;
+                                placeholder: @tr("Name");
+                                value <=> edit-name;
+                            }
+
+                            Text {
+                                text: rule.status;
+                                color: rule.status-kind == 2 ? Theme.success
+                                    : rule.status-kind == 4 ? Theme.danger
+                                    : rule.status-kind == 3 ? Theme.warning
+                                    : Theme.text-muted;
+                                font-size: Theme.fs-sm;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Field {
+                                horizontal-stretch: 1;
+                                placeholder: "127.0.0.1";
+                                value <=> edit-local-host;
+                            }
+                            Field {
+                                width: 68px;
+                                placeholder: "8080";
+                                value <=> edit-local-port;
+                            }
+                            Text {
+                                text: "\u{E5C8}";
+                                font-family: "Material Icons";
+                                color: Theme.text-muted;
+                                font-size: Theme.fs-md;
+                                vertical-alignment: center;
+                            }
+                            Field {
+                                horizontal-stretch: 1;
+                                placeholder: "127.0.0.1";
+                                value <=> edit-remote-host;
+                            }
+                            Field {
+                                width: 68px;
+                                placeholder: "80";
+                                value <=> edit-remote-port;
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Rectangle { horizontal-stretch: 1; }
+                            SmallButton {
+                                text: @tr("Save");
+                                clicked => {
+                                    root.update-rule(
+                                        rule.id,
+                                        edit-name,
+                                        edit-local-host,
+                                        edit-local-port,
+                                        edit-remote-host,
+                                        edit-remote-port
+                                    );
+                                }
+                            }
+                            SmallButton {
+                                text: rule.enabled ? @tr("Disable") : @tr("Enable");
+                                primary: !rule.enabled;
+                                clicked => { root.toggle-rule(rule.id, !rule.enabled); }
+                            }
+                            SmallButton {
+                                text: @tr("Delete");
+                                danger: true;
+                                clicked => { root.delete-rule(rule.id); }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

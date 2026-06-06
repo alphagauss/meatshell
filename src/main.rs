@@ -17,6 +17,7 @@ mod system;
 mod terminal_alacritty;
 mod terminal_engine;
 mod terminal_types;
+mod tunnel;
 
 fn main() -> anyhow::Result<()> {
     // Initialise tracing — honour RUST_LOG but default to info.

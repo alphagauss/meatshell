@@ -77,6 +77,7 @@ xattr -dr com.apple.quarantine meatshell     # clear the "unsigned app" Gatekeep
 - [x] Bottom Files / Tunnels tab shell (Files continues to use the SFTP panel)
 - [x] Basic SGR mouse reporting for the experimental alacritty engine (left click, release, wheel)
 - [x] First independent file-transfer window (local/remote split view, basic upload/download)
+- [x] First Local Forward tunnel support (session-linked rules, auto-start when enabled, separate `tunnels.json`)
 - [ ] Known-hosts (`known_hosts`) verification
 - [ ] Store session passwords in the OS keychain
 
@@ -95,6 +96,7 @@ xattr -dr com.apple.quarantine meatshell     # clear the "unsigned app" Gatekeep
 | Async runtime | [`tokio`](https://tokio.rs)                                       |
 | SSH protocol  | [`russh`](https://crates.io/crates/russh) (no libssh dependency)  |
 | Terminal parser | Legacy `vt100` by default; experimental [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) |
+| Tunnels       | `russh` direct-tcpip + `tokio` TCP forwarding                    |
 | System metrics| [`sysinfo`](https://crates.io/crates/sysinfo)                     |
 | Serialization | `serde` + `serde_json`                                            |
 | Logging       | `tracing` + `tracing-subscriber`                                  |
@@ -122,6 +124,12 @@ On first launch an empty session store is created at
 `%APPDATA%/meatshell/sessions.json`. Click **"＋ New Session"** in the top-right
 to add your first server.
 
+The bottom **Tunnels** tab supports first-pass Local Forward rules. Add a rule,
+fill `local host:port -> remote host:port`, save it, then enable it. Enabled
+rules for the session start after the terminal SSH connection succeeds and stop
+when the tab disconnects or closes. Rules are stored separately in
+`tunnels.json`, not in `sessions.json`.
+
 ## Project layout
 
 ```
@@ -136,7 +144,7 @@ meatshell/
 │   ├── tabs.slint           # top tab bar
 │   ├── top_action_bar.slint # toolbar below the tab bar
 │   ├── bottom_panel.slint   # bottom Files / Tunnels tab shell
-│   ├── tunnel_panel.slint   # tunnel tab empty state
+│   ├── tunnel_panel.slint   # Local Forward tunnel rules panel
 │   ├── transfer_window.slint # independent file-transfer window
 │   ├── local_file_panel.slint # transfer local panel
 │   ├── remote_file_panel.slint # transfer remote panel
@@ -149,6 +157,7 @@ meatshell/
     ├── connection.rs        # connection runtime, disconnect, reconnect entry
     ├── config.rs            # session JSON persistence
     ├── file_transfer.rs     # transfer-window local directory helper
+    ├── tunnel.rs            # Local Forward tunnel rules and worker tasks
     ├── terminal_alacritty.rs # experimental alacritty terminal engine
     ├── terminal_engine.rs   # terminal engine trait
     ├── terminal_types.rs    # terminal render data types

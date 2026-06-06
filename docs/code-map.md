@@ -24,6 +24,7 @@
 8. `src/connection.rs` 保存每个终端 tab 的连接运行态，统一包装 SSH session 的连接、断开、重连和状态
 9. `src/terminal_types.rs` / `src/terminal_engine.rs` 定义终端渲染数据、引擎模式和最小终端引擎 trait；`src/terminal_alacritty.rs` 提供可选实验 alacritty 引擎
 10. `src/file_transfer.rs` 和 `ui/transfer_window.slint` 提供独立文件传输窗口第一版；远程侧复用 `src/sftp.rs` worker
+11. `src/tunnel.rs` 和 `ui/tunnel_panel.slint` 提供当前 session 关联的 Local Forward 隧道规则、持久化和后台转发任务
 
 ## 2. 先看哪个文件
 
@@ -34,6 +35,7 @@
 - 改 SSH 认证、远端监控、OSC7 路径解析、出站代理：先看 `src/ssh.rs` 和 `src/proxy.rs`
 - 改 SFTP 列表、树形目录、下载 / 上传 / 删除 / 打开文件、出站代理：先看 `src/sftp.rs` 和 `src/proxy.rs`，再看 `ui/sftp_panel.slint`
 - 改独立文件传输窗口、本地目录浏览、双栏上传/下载：先看 `src/file_transfer.rs`、`src/app.rs` 的 `open_transfer_window(...)`，再看 `ui/transfer_window.slint`、`ui/local_file_panel.slint`、`ui/remote_file_panel.slint`
+- 改隧道 Local Forward、规则持久化、自动启停、端口占用状态：先看 `src/tunnel.rs`，再看 `src/app.rs` 的隧道回调/事件泵和 `ui/tunnel_panel.slint`
 - 改会话持久化、密码字段、代理字段、下载目录、语言配置：先看 `src/config.rs`
 - 改本机 CPU / 内存 / 网络 / 磁盘侧边栏：先看 `src/system.rs` 和 `ui/sidebar.slint`
 - 改语言、翻译、`@tr(...)` 文案：先看 `src/i18n.rs`、`build.rs`、`lang/*`、`ui/*.slint`
@@ -67,6 +69,9 @@
 - `spawn_transfer_sftp_event_pump(...)`
 - `apply_transfer_event_to_window(...)`
 - `refresh_transfer_local(...)`
+- `wire_tunnel_callbacks(...)`
+- `spawn_tunnel_event_pump(...)`
+- `refresh_tunnel_panel(...)`
 - `apply_session_event_to_window(...)`
 - `refresh_sidebar(...)`
 - `rebuild_tab_display(...)`
@@ -96,6 +101,7 @@
 - `TermBuffers`
 - `TransferWindowState`
 - `TransferWindows`
+- `TunnelStore`
 - `SftpHandles`
 - `SftpManualNav`
 - `TabStatuses`
@@ -148,6 +154,31 @@
 - `default_local_dir(...)`
 - `resolve_local_path(...)`
 - `list_local_dir(...)`
+
+### `src/tunnel.rs`
+职责：
+- 保存和读取独立的 `tunnels.json`，不把隧道规则塞进 `Session`
+- 定义当前 session 关联的 Local Forward 规则、运行状态和后台任务句柄
+- 为 enabled 规则启动独立 SSH 连接，通过 `direct-tcpip` 转发本地 TCP 流量
+- 提供 stop/cancel 入口，session 断开、重连或 tab 关闭时释放本地监听端口
+- 通过 `TunnelEvent` 把 Starting / Running / Reconnecting / Failed / Stopped 状态推回 UI
+
+关键符号：
+- `TunnelRule`
+- `TunnelStatus`
+- `TunnelView`
+- `TunnelEvent`
+- `TunnelHandle`
+- `TunnelManager`
+- `run_tunnel(...)`
+- `connect_and_serve(...)`
+- `connect_ssh(...)`
+- `authenticate(...)`
+
+定位提示：
+- 端口占用、认证失败、自动重连/backoff、停止后端口释放问题，先看这里
+- UI 规则保存/启用/删除入口在 `src/app.rs::wire_tunnel_callbacks(...)`
+- session 连接成功后自动启动和断开后停止，在 `src/app.rs::spawn_shell_event_pump(...)`
 
 ### `src/terminal_types.rs`
 职责：
@@ -357,10 +388,12 @@
 - 定义 Rust 侧需要的全部回调和模型字段
 - 组装左侧栏、Tab 栏、顶部工具栏、欢迎页、终端页、底部面板、会话对话框
 - 暴露 `sidebar-visible`、`bottom-panel-visible`、`bottom-panel-tab` 布局状态给 Rust 侧 `AppState`
+- 暴露当前 active session 的 `tunnel-rules` 模型和隧道规则增删改/启用回调给 Rust
 
 关键符号：
 - `AppWindow`
 - `TransferInfo`
+- `TunnelRuleInfo`
 - `TransferWindow`
 - `TerminalState`
 - `toggle-sidebar`
@@ -369,9 +402,13 @@
 - `disconnect-active-tab`
 - `reconnect-active-tab`
 - `open-transfer-window`
+- `tunnel-add-rule`
+- `tunnel-update-rule`
+- `tunnel-toggle-rule`
+- `tunnel-delete-rule`
 - `terminal-mouse`
 - `dialog-proxy`
-- 导出类型：`SessionInfo`、`SessionDraft`、`TabInfo`、`SftpEntry`、`SftpTreeNode`
+- 导出类型：`SessionInfo`、`SessionDraft`、`TabInfo`、`SftpEntry`、`SftpTreeNode`、`TunnelRuleInfo`
 
 定位提示：
 - Rust 回调名、属性名、模型字段改动时，先改这里
@@ -386,6 +423,7 @@
 - 当终端引擎报告 SGR mouse mode 已开启时，把左键按下/释放和滚轮转发给 Rust，避免普通文本选择退化
 - 底部 `BottomPanel` 承载
 - 根据 `bottom-panel-visible` / `bottom-panel-tab` 决定当前底部文件面板是否显示
+- 把 `tunnel-rules` 和隧道规则回调继续传给底部 `TunnelPanel`
 
 关键符号：
 - `TermSpan`
@@ -409,7 +447,7 @@
 职责：
 - 底部“文件 / 隧道”页签外壳
 - `Files` 页继续承载现有 `SftpPanel`
-- `Tunnels` 页承载 `TunnelPanel` 空状态
+- `Tunnels` 页承载 `TunnelPanel` 规则管理面板
 
 关键符号：
 - `BottomPanel`
@@ -417,10 +455,13 @@
 
 ### `ui/tunnel_panel.slint`
 职责：
-- 隧道页签第一版空状态，真实规则管理在后续阶段实现
+- 显示当前 session 的 Local Forward 规则列表
+- 支持新增规则、保存本地/远端地址端口、启用/禁用、删除规则
+- 显示 Stopped / Starting / Running / Reconnecting / Failed 状态
 
 关键符号：
 - `TunnelPanel`
+- `TunnelRuleInfo`
 
 ### `ui/transfer_window.slint`
 职责：
@@ -524,6 +565,7 @@
 ## 5. 资源与数据目录
 
 - `plan.md`：阶段执行计划和完成状态；每完成一个阶段后更新对应勾选项
+- `tunnels.json`：运行时生成的用户配置文件，保存 Local Forward 隧道规则（位于系统配置目录，不在仓库内）
 - `lang/zh/LC_MESSAGES/meatshell.po` 和 `lang/en/LC_MESSAGES/meatshell.po`：翻译资源
 - `.github/workflows/release.yml`：打 tag / 手动发布的构建与上传 workflow
 - `assets/meatshell.ico`：Windows 程序图标
@@ -536,6 +578,7 @@
 - SSH 连接 / 认证 / 代理：`src/ssh.rs` -> `src/proxy.rs` -> `src/config.rs`
 - SFTP 列表 / 下载 / 上传 / 删除 / 代理：`src/sftp.rs` -> `src/proxy.rs` -> `ui/sftp_panel.slint`
 - 独立文件传输窗口：`src/app.rs` -> `src/file_transfer.rs` / `src/sftp.rs` -> `ui/transfer_window.slint`
+- 隧道 Local Forward：`src/app.rs` -> `src/tunnel.rs` -> `ui/tunnel_panel.slint`
 - 终端显示 / 搜索 / 选区：`src/app.rs` -> `ui/terminal_view.slint`
 - 侧边栏资源数据：`src/system.rs`、`src/ssh.rs` -> `ui/sidebar.slint`
 - 会话导入 / 编辑：`src/ssh_config.rs`、`src/config.rs` -> `ui/session_dialog.slint`、`ui/welcome.slint`

@@ -1,6 +1,6 @@
 import { Theme } from "theme.slint";
 import { SftpPanel, SftpEntry, SftpTreeNode } from "sftp_panel.slint";
-import { TunnelPanel } from "tunnel_panel.slint";
+import { TunnelPanel, TunnelRuleInfo } from "tunnel_panel.slint";
 
 component PanelTab inherits Rectangle {
     in property <string> label;
@@ -33,6 +33,7 @@ export component BottomPanel inherits Rectangle {
     in property <string> status: "";
     in property <bool> loading: false;
     in property <[SftpTreeNode]> tree-nodes: [];
+    in property <[TunnelRuleInfo]> tunnel-rules: [];
 
     callback select-tab(string);
     callback navigate(string);
@@ -43,6 +44,10 @@ export component BottomPanel inherits Rectangle {
     callback delete(string);
     callback view(string);
     callback edit(string);
+    callback tunnel-add-rule();
+    callback tunnel-update-rule(string, string, string, string, string, string);
+    callback tunnel-toggle-rule(string, bool);
+    callback tunnel-delete-rule(string);
 
     background: Theme.bg-panel;
 
@@ -95,6 +100,13 @@ export component BottomPanel inherits Rectangle {
 
         if root.active-tab == "tunnels" : TunnelPanel {
             vertical-stretch: 1;
+            rules: root.tunnel-rules;
+            add-rule => { root.tunnel-add-rule(); }
+            update-rule(id, name, lh, lp, rh, rp) => {
+                root.tunnel-update-rule(id, name, lh, lp, rh, rp);
+            }
+            toggle-rule(id, enabled) => { root.tunnel-toggle-rule(id, enabled); }
+            delete-rule(id) => { root.tunnel-delete-rule(id); }
         }
     }
 }

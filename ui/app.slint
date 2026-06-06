@@ -18,8 +18,9 @@ import { SessionDialog, SessionDraft } from "session_dialog.slint";
 import { TerminalView, TermSpan, TermMatch } from "terminal_view.slint";
 import { TransferWindow } from "transfer_window.slint";
 import { SftpEntry, SftpTreeNode } from "sftp_panel.slint";
+import { TunnelRuleInfo } from "tunnel_panel.slint";
 
-export { SessionInfo, SessionDraft, TabInfo, SftpEntry, SftpTreeNode, TransferWindow }
+export { SessionInfo, SessionDraft, TabInfo, SftpEntry, SftpTreeNode, TunnelRuleInfo, TransferWindow }
 
 // --- TerminalState ---------------------------------------------------------
 // Per-terminal view-model exposed to Rust. A TabInfo has the metadata; the
@@ -113,6 +114,7 @@ export component AppWindow inherits Window {
     in property <[TabInfo]> tabs;
     in-out property <string> active-tab-id: "welcome";
     in property <[TerminalState]> terminals;
+    in property <[TunnelRuleInfo]> tunnel-rules;
 
     // --- Dialog state ------------------------------------------------------
     in-out property <bool> dialog-open: false;
@@ -172,6 +174,12 @@ export component AppWindow inherits Window {
     callback sftp-delete(string /* tab-id */, string /* path */);
     callback sftp-view(string /* tab-id */, string /* path */);
     callback sftp-edit(string /* tab-id */, string /* path */);
+
+    // --- Tunnel callbacks -------------------------------------------------
+    callback tunnel-add-rule();
+    callback tunnel-update-rule(string /* id */, string /* name */, string /* local-host */, string /* local-port */, string /* remote-host */, string /* remote-port */);
+    callback tunnel-toggle-rule(string /* id */, bool /* enabled */);
+    callback tunnel-delete-rule(string /* id */);
 
     // --- Clipboard callbacks ----------------------------------------------
     // Paste clipboard text into the active terminal.
@@ -286,6 +294,7 @@ export component AppWindow inherits Window {
                     sftp-status: term.sftp-status;
                     sftp-loading: term.sftp-loading;
                     sftp-tree-nodes: term.sftp-tree-nodes;
+                    tunnel-rules: root.tunnel-rules;
                     send-key(key, ctrl, alt, shift) => { root.send-key(term.id, key, ctrl, alt, shift) }
                     terminal-resize(w, h) => { root.terminal-resize(term.id, w, h) }
                     terminal-mouse(button, pressed, row, col) => { root.terminal-mouse(term.id, button, pressed, row, col) }
@@ -298,6 +307,12 @@ export component AppWindow inherits Window {
                     sftp-delete(path) => { root.sftp-delete(term.id, path); }
                     sftp-view(path) => { root.sftp-view(term.id, path); }
                     sftp-edit(path) => { root.sftp-edit(term.id, path); }
+                    tunnel-add-rule => { root.tunnel-add-rule(); }
+                    tunnel-update-rule(id, name, lh, lp, rh, rp) => {
+                        root.tunnel-update-rule(id, name, lh, lp, rh, rp);
+                    }
+                    tunnel-toggle-rule(id, enabled) => { root.tunnel-toggle-rule(id, enabled); }
+                    tunnel-delete-rule(id) => { root.tunnel-delete-rule(id); }
                     paste-from-clipboard() => { root.paste-from-clipboard(term.id); }
                     copy-terminal-text() => { root.copy-terminal-text(term.id); }
                     clear-terminal() => { root.clear-terminal(term.id); }
