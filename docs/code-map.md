@@ -332,10 +332,15 @@
 - 接收 SSH 输出 bytes，交给 alacritty parser 更新终端状态
 - 把 alacritty grid/cell 转换为 `BuiltScreen<RenderSpan>`，不把 alacritty 内部类型泄漏到 `app/mod.rs` 或 Slint
 - 支持基础 resize，并从 alacritty `TermMode` 暴露 mouse reporting / application cursor / bracketed paste 状态给 UI
+- render adapter 当前把 cell 转成 plain/render 双文本，再通过小 helper 合并 span，避免宽字符占位 cell、行尾空白和背景色 span 在 `render()` 里反复手写
 
 关键符号：
 - `AlacrittyTerminalEngine`
 - `AlacrittyDimensions`
+- `cell_to_attrs(...)`
+- `convert_color(...)`
+- `should_skip_wide_placeholder(...)`
+- `push_span(...)`
 
 定位提示：
 - 实验引擎显示、颜色、宽字符或 resize 问题，先看这里

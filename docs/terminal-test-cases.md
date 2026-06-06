@@ -5,6 +5,21 @@
 - `Legacy` fallback
 - `Alacritty Experimental`
 
+## 0. Alacritty 启动与冒烟
+
+- [ ] `MEATSHELL_TERMINAL_ENGINE=alacritty cargo run`
+- [ ] `echo hello`
+- [ ] `clear`
+- [ ] 中文输出
+- [ ] emoji 输出
+- [ ] `vim`
+- [ ] `nano`
+- [ ] `less`
+- [ ] `htop`
+- [ ] `tmux`
+- [ ] PowerShell
+- [ ] resize
+
 ## 1. 普通 shell
 
 - [ ] `echo hello`
