@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 /// current input line using `\r` + full-line redraw + `\x1b[K` (erase to EOL)
 /// whenever the cursor moves. A naive append-only buffer would duplicate the
 /// text; vt100 tracks cursor position and overwrites in place correctly.
-struct TermBuffer {
+struct LegacyTerminalEngine {
     parser: vt100::Parser,
     /// Active find query for this tab ("" = no search).
     find_query: String,
@@ -66,9 +66,12 @@ use crate::i18n::t;
 use crate::sftp::{spawn_sftp, SftpHandle};
 use crate::ssh::{format_mtime, format_size, SessionEvent};
 use crate::system::{format_bytes_per_sec, SystemSampler, SystemSnapshot};
+use crate::terminal_engine::TerminalEngine;
+use crate::terminal_types::{BuiltScreen, HistSpan, Line};
 
 type SftpHandles = Arc<Mutex<HashMap<String, SftpHandle>>>;
 type ConnectionStore = Arc<Mutex<ConnectionManager>>;
+type TermBuffer = LegacyTerminalEngine;
 /// Per-tab flag: once the user explicitly navigates via the SFTP tree or
 /// toolbar, stop auto-syncing to the terminal's `cd` path.
 type SftpManualNav = Arc<Mutex<HashMap<String, bool>>>;
@@ -1478,7 +1481,7 @@ fn rebuild_tab_display(win: &AppWindow, bufs: &TermBuffers, tab_id: &str) {
             return;
         };
         let cols = buf.parser.screen().size().1;
-        let b = buf.render(); // also refreshes buf.displayed_text
+        let b = TerminalEngine::render(buf); // also refreshes buf.displayed_text
         let matches = compute_find_matches(&buf.displayed_text, &buf.find_query);
         let sel = match buf.sel {
             Some((sr, sc, er, ec)) => selection_rects(sr, sc, er, ec, cols),
@@ -1683,9 +1686,9 @@ fn apply_session_event_to_window(
                 if let Some(buf) = map.get_mut(tab_id) {
                     // Capture scrolled-off lines into history, then render the
                     // current view (live or scrolled-back).
-                    buf.ingest(chunk.as_bytes());
+                    TerminalEngine::ingest(buf, chunk.as_bytes());
                     let cols = buf.parser.screen().size().1;
-                    let b = buf.render(); // refreshes buf.displayed_text
+                    let b = TerminalEngine::render(buf); // refreshes buf.displayed_text
                     let matches = compute_find_matches(&buf.displayed_text, &buf.find_query);
                     let sel = match buf.sel {
                         Some((sr, sc, er, ec)) => selection_rects(sr, sc, er, ec, cols),
@@ -2414,7 +2417,7 @@ fn wire_key_input(
                     }
                     buf.parser.process(format!("\x1b[{delta}S").as_bytes());
                 }
-                buf.parser.set_size(new_rows, cols as u16);
+                TerminalEngine::resize(buf, new_rows, cols as u16);
                 // The pre/post-resize screens differ in size+content; drop the
                 // scroll-detection snapshot so the next output isn't mis-read as
                 // a scroll (which would double-capture lines).
@@ -2858,29 +2861,6 @@ fn c0_letter_key_down(cp: u32) -> bool {
     unsafe { (GetKeyState(vk) as u16) & 0x8000 != 0 }
 }
 
-/// A coloured, cursor-annotated snapshot ready for the Slint terminal grid.
-struct BuiltScreen {
-    spans: Vec<TermSpan>,
-    cursor_row: i32,
-    cursor_col: i32,
-    rows_used: i32,
-    is_alt: bool,
-}
-
-/// One coloured run within a line (its grid row is assigned at render time).
-#[derive(Clone)]
-struct HistSpan {
-    text: String,
-    fg: slint::Color,
-    bg: slint::Color,
-    bold: bool,
-    col: i32,
-    cells: i32,
-}
-
-/// A rendered line: plain text (one char per cell, for find/selection) + runs.
-type Line = (String, Vec<HistSpan>);
-
 /// Per-session scrollback cap (recycled on clear / tab close).
 const MAX_HISTORY: usize = 100_000;
 
@@ -2972,7 +2952,7 @@ fn detect_scroll(prev: &[Line], curr: &[Line]) -> usize {
     best_k
 }
 
-impl TermBuffer {
+impl LegacyTerminalEngine {
     /// Feed bytes to vt100 and capture scrolled-off lines into history.
     ///
     /// We detect scroll by diffing the screen before/after a `process`, which
@@ -3102,7 +3082,7 @@ impl TermBuffer {
 
     /// Render the terminal grid for the current scrollback `view_offset`
     /// (0 = live).  Caches the displayed plain text for find/selection.
-    fn render(&mut self) -> BuiltScreen {
+    fn render(&mut self) -> BuiltScreen<TermSpan> {
         let (is_alt, rows, cols, cur_row, cur_col) = {
             let s = self.parser.screen();
             let (r, c) = s.size();
@@ -3197,6 +3177,22 @@ impl TermBuffer {
             rows_used: win as i32,
             is_alt: false,
         }
+    }
+}
+
+impl TerminalEngine for LegacyTerminalEngine {
+    type Screen = BuiltScreen<TermSpan>;
+
+    fn ingest(&mut self, bytes: &[u8]) {
+        LegacyTerminalEngine::ingest(self, bytes);
+    }
+
+    fn render(&mut self) -> Self::Screen {
+        LegacyTerminalEngine::render(self)
+    }
+
+    fn resize(&mut self, rows: u16, cols: u16) {
+        self.parser.set_size(rows, cols);
     }
 }
 

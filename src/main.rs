@@ -13,6 +13,8 @@ mod sftp;
 mod ssh;
 mod ssh_config;
 mod system;
+mod terminal_engine;
+mod terminal_types;
 
 fn main() -> anyhow::Result<()> {
     // Initialise tracing — honour RUST_LOG but default to info.

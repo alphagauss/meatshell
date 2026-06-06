@@ -129,6 +129,8 @@ meatshell/
     ├── app.rs               # UI ↔ backend bridge
     ├── connection.rs        # connection runtime, disconnect, reconnect entry
     ├── config.rs            # session JSON persistence
+    ├── terminal_engine.rs   # terminal engine trait
+    ├── terminal_types.rs    # terminal render data types
     ├── system.rs            # CPU / memory / network sampling
     └── ssh.rs               # SSH session worker
 ```

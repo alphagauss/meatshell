@@ -124,6 +124,8 @@ meatshell/
     ├── app.rs               # UI ↔ 后端桥接
     ├── connection.rs        # 连接运行态、断开、重连入口
     ├── config.rs            # 会话 JSON 持久化
+    ├── terminal_engine.rs   # 终端引擎 trait
+    ├── terminal_types.rs    # 终端渲染数据类型
     ├── system.rs            # CPU / 内存 / 网络采样
     └── ssh.rs               # SSH 会话 worker
 ```
