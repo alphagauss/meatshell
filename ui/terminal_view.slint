@@ -87,6 +87,8 @@ export component TerminalView inherits Rectangle {
     in property <[SftpTreeNode]> sftp-tree-nodes: [];
 
     in-out property <length> sftp-panel-height: 220px;
+    in property <bool> bottom-panel-visible: true;
+    in property <string> bottom-panel-tab: "files";
 
     callback send-key(string, bool, bool, bool);
     callback terminal-resize(float, float);
@@ -607,7 +609,8 @@ export component TerminalView inherits Rectangle {
 
         // --- Drag handle ----------------------------------------------------
         Rectangle {
-            height: 4px;
+            visible: root.bottom-panel-visible && root.bottom-panel-tab == "files";
+            height: root.bottom-panel-visible && root.bottom-panel-tab == "files" ? 4px : 0px;
             background: divider-ta.has-hover || root.sftp-dragging
                 ? Theme.accent
                 : Theme.border-subtle;
@@ -638,7 +641,8 @@ export component TerminalView inherits Rectangle {
 
         // --- SFTP panel -----------------------------------------------------
         SftpPanel {
-            height: root.sftp-panel-height;
+            visible: root.bottom-panel-visible && root.bottom-panel-tab == "files";
+            height: root.bottom-panel-visible && root.bottom-panel-tab == "files" ? root.sftp-panel-height : 0px;
             current-path:  root.sftp-path;
             entries:       root.sftp-entries;
             status:        root.sftp-status;

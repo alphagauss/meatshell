@@ -58,6 +58,7 @@ use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use tokio::runtime::Runtime;
 
+use crate::app_state::AppState;
 use crate::config::{AuthMethod, ConfigStore, Secret, Session};
 use crate::i18n::t;
 use crate::sftp::{spawn_sftp, SftpHandle};
@@ -143,6 +144,14 @@ pub fn run() -> Result<()> {
     crate::i18n::set_language(store.borrow().language());
     crate::i18n::apply_to_slint();
     window.set_lang_en(crate::i18n::is_en());
+
+    let app_state = Rc::new(RefCell::new(AppState::default()));
+    {
+        let state = app_state.borrow();
+        window.set_sidebar_visible(state.sidebar_visible);
+        window.set_bottom_panel_visible(state.bottom_panel_visible);
+        window.set_bottom_panel_tab(state.bottom_panel_tab.as_str().into());
+    }
 
     let sessions_model: Rc<VecModel<SessionInfo>> = Rc::new(VecModel::default());
     window.set_sessions(ModelRc::from(sessions_model.clone()));

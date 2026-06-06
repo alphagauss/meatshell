@@ -20,9 +20,11 @@
 4. `src/ssh.rs` 和 `src/sftp.rs` 分别负责 SSH 终端会话和 SFTP 子系统，两者都在 Tokio 任务里跑；可选出站代理逻辑在 `src/proxy.rs`
 5. `src/system.rs` 提供本机侧资源采样，`src/i18n.rs` 负责运行时语言切换
 6. `build.rs` 负责编译 Slint UI、打包翻译文件，并在 Windows 上嵌入图标
+7. `src/app_state.rs` 保存少量跨组件 UI 布局状态，当前只覆盖侧边栏、底部面板显示和底部面板页签
 
 ## 2. 先看哪个文件
 
+- 改顶部工具栏、侧边栏/底部面板显隐、底部面板页签状态：先看 `src/app_state.rs`、`src/app.rs`、`ui/app.slint` 和 `ui/terminal_view.slint`
 - 改终端显示、选区、搜索、高亮、拖拽上传、Tab 切换、回调绑定：先看 `src/app.rs`，再看 `ui/app.slint` 和 `ui/terminal_view.slint`；终端缩窗后的回滚保留也在 `src/app.rs` 的 `wire_key_input(...)`
 - 改 SSH 连接、认证、远端监控、OSC7 路径解析、出站代理：先看 `src/ssh.rs` 和 `src/proxy.rs`
 - 改 SFTP 列表、树形目录、下载 / 上传 / 删除 / 打开文件、出站代理：先看 `src/sftp.rs` 和 `src/proxy.rs`，再看 `ui/sftp_panel.slint`
@@ -37,6 +39,7 @@
 ### `src/app.rs`
 职责：
 - 顶层 UI 状态机和 glue code
+- 初始化 `AppState`，并把默认布局状态同步到 Slint 窗口属性
 - 维护 tabs / terminals / SFTP 状态
 - 处理终端渲染、搜索、选区、拖拽、侧边栏刷新
 - 把 Slint 回调路由到 SSH / SFTP / 配置 / 系统采样模块
@@ -91,6 +94,15 @@
 - 任何 callback 签名变动，通常都要同时改这里和 `ui/app.slint`
 - 终端显示问题，优先查 `TermBuffer` 和 `apply_session_event_to_window(...)`
 - 选区 / 搜索问题，优先查 `compute_find_matches(...)`、`selection_rects(...)`、`extract_selection(...)`
+
+### `src/app_state.rs`
+职责：
+- 保存少量全局 UI 布局状态，避免继续把阶段 2 的工具栏/底部面板状态直接散落在 `src/app.rs`
+- 当前只包含 `sidebar_visible`、`bottom_panel_visible`、`bottom_panel_tab`
+
+关键符号：
+- `AppState`
+- `BottomPanelTab`
 
 ### `src/ssh.rs`
 职责：
@@ -262,6 +274,7 @@
 - 顶层窗口 `AppWindow`
 - 定义 Rust 侧需要的全部回调和模型字段
 - 组装左侧栏、Tab 栏、欢迎页、终端页、SFTP 面板、会话对话框
+- 暴露 `sidebar-visible`、`bottom-panel-visible`、`bottom-panel-tab` 布局状态给 Rust 侧 `AppState`
 
 关键符号：
 - `AppWindow`
@@ -281,6 +294,7 @@
 - 隐藏 IME 输入
 - 搜索高亮、拖拽选区、右键菜单、滚轮滚动
 - 底部 SFTP 面板承载
+- 根据 `bottom-panel-visible` / `bottom-panel-tab` 决定当前底部文件面板是否显示
 
 关键符号：
 - `TermSpan`
