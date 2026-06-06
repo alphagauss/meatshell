@@ -20,12 +20,6 @@ impl TerminalEngineMode {
             _ => Self::Legacy,
         }
     }
-
-    pub fn from_env() -> Option<Self> {
-        std::env::var("MEATSHELL_TERMINAL_ENGINE")
-            .ok()
-            .map(|value| Self::from_str(&value))
-    }
 }
 
 pub trait TerminalEngine {

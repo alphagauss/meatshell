@@ -237,26 +237,14 @@ pub fn run() -> Result<()> {
                 }
                 s.terminal_engine_mode()
             };
-            let message =
-                if TerminalEngineMode::from_env().is_some() && effective_mode != requested_mode {
-                    format!(
-                        "{}: {}",
-                        t(
-                            "终端引擎配置已保存；当前仍由环境变量覆盖",
-                            "Terminal engine setting saved; environment override still wins"
-                        ),
-                        effective_mode.as_str()
-                    )
-                } else {
-                    format!(
-                        "{}: {}",
-                        t(
-                            "终端引擎已更新，新建会话生效",
-                            "Terminal engine updated; new sessions only"
-                        ),
-                        effective_mode.as_str()
-                    )
-                };
+            let message = format!(
+                "{}: {}",
+                t(
+                    "终端引擎已更新，新建会话生效",
+                    "Terminal engine updated; new sessions only"
+                ),
+                effective_mode.as_str()
+            );
             if let Some(w) = weak.upgrade() {
                 w.set_terminal_engine_mode(effective_mode.as_str().into());
                 w.set_settings_hint(message.clone().into());

@@ -3,9 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
-use crate::terminal::alacritty::AlacrittyTerminalEngine;
 use crate::terminal::engine::TerminalEngine;
-use crate::terminal::legacy::{build_row, CsiState, MAX_HISTORY};
+use crate::terminal::legacy::{build_row, CsiState, LegacyTerminalEngine, MAX_HISTORY};
 use crate::terminal::types::Line;
 
 use super::models::set_terminal_row;
@@ -376,10 +375,10 @@ pub(super) fn wire_key_input(
                         let payload = {
                             let map = bufs.lock().unwrap();
                             match map.get(&tid) {
-                                Some(buf) if TerminalEngine::bracketed_paste(buf) => {
-                                    format!("\x1b[200~{text}\x1b[201~").into_bytes()
+                                Some(buf) => {
+                                    clipboard_payload(&text, TerminalEngine::bracketed_paste(buf))
                                 }
-                                _ => text.into_bytes(),
+                                None => clipboard_payload(&text, false),
                             }
                         };
                         connections.lock().unwrap().send_raw(&tid, payload);
@@ -398,11 +397,21 @@ pub(super) fn wire_key_input(
         let weak = window.as_weak();
         window.on_clear_terminal(move |tab_id: SharedString| {
             let tid = tab_id.to_string();
+            let mut fallback_message = None;
             if let Some(buf) = bufs_clear.lock().unwrap().get_mut(&tid) {
                 let (rows, cols) = buf.parser.screen().size();
+                let requested_mode = buf.current_mode();
                 buf.parser = vt100::Parser::new(rows, cols, 5000);
-                if buf.alacritty.is_some() {
-                    buf.alacritty = Some(AlacrittyTerminalEngine::new(rows, cols));
+                if requested_mode == crate::terminal::engine::TerminalEngineMode::Alacritty {
+                    buf.alacritty = LegacyTerminalEngine::try_create_alacritty(rows, cols);
+                    if buf.alacritty.is_none() {
+                        fallback_message = Some(crate::i18n::t(
+                            "Alacritty 初始化失败，当前会话已回退到 Legacy",
+                            "Alacritty initialization failed; this session fell back to Legacy",
+                        ));
+                    }
+                } else {
+                    buf.alacritty = None;
                 }
                 buf.find_query.clear();
                 buf.history = Vec::new(); // recycle the session scrollback
@@ -422,6 +431,10 @@ pub(super) fn wire_key_input(
                     row.rows_used = 0;
                     row.mouse_reporting = false;
                 });
+                if let Some(message) = fallback_message {
+                    win.set_settings_hint(message.into());
+                    win.set_ssh_import_hint(message.into());
+                }
             }
             connections_clear.lock().unwrap().send_raw(&tid, vec![0x0c]); // Ctrl+L → shell clears + redraws prompt
         });
@@ -618,6 +631,7 @@ fn key_to_pty_bytes(key: &str, ctrl: bool, alt: bool, app_cursor: bool) -> Vec<u
         "\u{F701}" => Some(if app_cursor { b"\x1bOB" } else { b"\x1b[B" }), // Down
         "\u{F702}" => Some(if app_cursor { b"\x1bOD" } else { b"\x1b[D" }), // Left
         "\u{F703}" => Some(if app_cursor { b"\x1bOC" } else { b"\x1b[C" }), // Right
+        "\u{F727}" => Some(b"\x1b[2~"),                                     // Insert
         "\u{F729}" => Some(b"\x1b[H"),                                      // Home
         "\u{F72B}" => Some(b"\x1b[F"),                                      // End
         "\u{F72C}" => Some(b"\x1b[5~"),                                     // PageUp
@@ -715,6 +729,14 @@ fn key_to_pty_bytes(key: &str, ctrl: bool, alt: bool, app_cursor: bool) -> Vec<u
     key.as_bytes().to_vec()
 }
 
+fn clipboard_payload(text: &str, bracketed: bool) -> Vec<u8> {
+    if bracketed {
+        format!("\x1b[200~{text}\x1b[201~").into_bytes()
+    } else {
+        text.as_bytes().to_vec()
+    }
+}
+
 fn sgr_mouse_sequence(
     button: i32,
     pressed: bool,
@@ -776,4 +798,98 @@ fn c0_letter_key_down(cp: u32) -> bool {
         fn GetKeyState(nVirtKey: i32) -> i16;
     }
     unsafe { (GetKeyState(vk) as u16) & 0x8000 != 0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clipboard_payload, key_to_pty_bytes, sgr_mouse_sequence};
+
+    #[test]
+    fn arrow_keys_follow_application_cursor_mode() {
+        assert_eq!(key_to_pty_bytes("\u{F700}", false, false, true), b"\x1bOA");
+        assert_eq!(key_to_pty_bytes("\u{F701}", false, false, true), b"\x1bOB");
+        assert_eq!(key_to_pty_bytes("\u{F702}", false, false, true), b"\x1bOD");
+        assert_eq!(key_to_pty_bytes("\u{F703}", false, false, true), b"\x1bOC");
+
+        assert_eq!(key_to_pty_bytes("\u{F700}", false, false, false), b"\x1b[A");
+        assert_eq!(key_to_pty_bytes("\u{F701}", false, false, false), b"\x1b[B");
+        assert_eq!(key_to_pty_bytes("\u{F702}", false, false, false), b"\x1b[D");
+        assert_eq!(key_to_pty_bytes("\u{F703}", false, false, false), b"\x1b[C");
+    }
+
+    #[test]
+    fn special_keys_cover_insert_delete_page_and_function_keys() {
+        assert_eq!(
+            key_to_pty_bytes("\u{F727}", false, false, false),
+            b"\x1b[2~"
+        );
+        assert_eq!(
+            key_to_pty_bytes("\u{F728}", false, false, false),
+            b"\x1b[3~"
+        );
+        assert_eq!(key_to_pty_bytes("\u{F729}", false, false, false), b"\x1b[H");
+        assert_eq!(key_to_pty_bytes("\u{F72B}", false, false, false), b"\x1b[F");
+        assert_eq!(
+            key_to_pty_bytes("\u{F72C}", false, false, false),
+            b"\x1b[5~"
+        );
+        assert_eq!(
+            key_to_pty_bytes("\u{F72D}", false, false, false),
+            b"\x1b[6~"
+        );
+        assert_eq!(key_to_pty_bytes("\u{F704}", false, false, false), b"\x1bOP");
+        assert_eq!(key_to_pty_bytes("\u{F707}", false, false, false), b"\x1bOS");
+        assert_eq!(
+            key_to_pty_bytes("\u{F708}", false, false, false),
+            b"\x1b[15~"
+        );
+        assert_eq!(
+            key_to_pty_bytes("\u{F70F}", false, false, false),
+            b"\x1b[24~"
+        );
+    }
+
+    #[test]
+    fn ctrl_combinations_map_to_c0() {
+        assert_eq!(key_to_pty_bytes("a", true, false, false), vec![0x01]);
+        assert_eq!(key_to_pty_bytes("z", true, false, false), vec![0x1a]);
+        assert_eq!(key_to_pty_bytes("[", true, false, false), vec![0x1b]);
+        assert_eq!(key_to_pty_bytes("\\", true, false, false), vec![0x1c]);
+        assert_eq!(key_to_pty_bytes("]", true, false, false), vec![0x1d]);
+        assert_eq!(key_to_pty_bytes("^", true, false, false), vec![0x1e]);
+        assert_eq!(key_to_pty_bytes("_", true, false, false), vec![0x1f]);
+    }
+
+    #[test]
+    fn alt_prefixes_plain_text() {
+        assert_eq!(key_to_pty_bytes("x", false, true, false), b"\x1bx");
+        assert_eq!(key_to_pty_bytes("!", false, true, false), b"\x1b!");
+    }
+
+    #[test]
+    fn clipboard_payload_wraps_bracketed_paste_without_rewriting_newlines() {
+        let text = "line1\r\nline2\nline3";
+        assert_eq!(
+            clipboard_payload(text, true),
+            b"\x1b[200~line1\r\nline2\nline3\x1b[201~"
+        );
+    }
+
+    #[test]
+    fn clipboard_payload_plain_keeps_original_bytes() {
+        let text = "plain\r\npaste";
+        assert_eq!(clipboard_payload(text, false), text.as_bytes());
+    }
+
+    #[test]
+    fn sgr_mouse_sequence_clamps_and_marks_press_release() {
+        assert_eq!(
+            sgr_mouse_sequence(0, true, -5, 99, 24, 80),
+            b"\x1b[<0;80;1M"
+        );
+        assert_eq!(
+            sgr_mouse_sequence(64, false, 99, -5, 24, 80),
+            b"\x1b[<64;1;24m"
+        );
+    }
 }

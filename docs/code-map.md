@@ -22,7 +22,7 @@
 6. `build.rs` 负责编译 Slint UI、打包翻译文件，并在 Windows 上嵌入图标
 7. `src/app/state.rs` 保存少量跨组件 UI 布局状态，当前只覆盖侧边栏、底部面板显示和底部面板页签
 8. `src/connection.rs` 保存每个终端 tab 的连接运行态，统一包装 SSH session 的连接、断开、重连和状态
-9. `src/terminal/mod.rs` 是终端核心模块入口；`src/terminal/types.rs` / `src/terminal/engine.rs` 定义终端渲染数据、引擎模式和最小终端引擎 trait，`src/terminal/legacy.rs` 提供 legacy vt100 fallback 实现，`src/terminal/alacritty.rs` 提供可选的 Alacritty Experimental 引擎
+9. `src/terminal/mod.rs` 是终端核心模块入口；`src/terminal/types.rs` / `src/terminal/engine.rs` 定义终端渲染数据、引擎模式和最小终端引擎 trait，`src/terminal/legacy.rs` 提供 legacy vt100 fallback 实现和 Alacritty 初始化失败时的回退入口，`src/terminal/alacritty.rs` 提供 Alacritty Experimental 引擎
 10. `src/file_transfer.rs`、`src/app/transfer.rs` 和 `ui/transfer_window.slint` 提供独立文件传输窗口第一版；远程侧复用 `src/sftp.rs` worker
 11. `src/tunnel.rs`、`src/app/tunnels.rs` 和 `ui/tunnel_panel.slint` 提供当前 session 关联的 Local Forward 隧道规则、持久化和后台转发任务
 
@@ -55,7 +55,7 @@
 - 顶层 UI 状态机和 glue code
 - 初始化 `src/app/state.rs` 里的 `AppState`，并把默认布局状态同步到 Slint 窗口属性
 - 通过 `ConnectionManager` 管理每个终端 tab 的 SSH runtime
-- 持有当前终端 wrapper，默认走 legacy vt100 fallback；新建会话时按 `ConfigStore::terminal_engine_mode()` 选择是否委托到 Alacritty Experimental，引擎环境变量 `MEATSHELL_TERMINAL_ENGINE` 仍优先于配置
+- 持有当前终端 wrapper，新建会话时按 `ConfigStore::terminal_engine_mode()` 选择默认终端引擎；缺省优先 Alacritty Experimental，初始化失败时当前会话回退到 legacy vt100 fallback 并提示
 - 维护 tabs / terminals / SFTP 状态
 - 把 Slint 回调路由到 SSH / SFTP / 配置 / 系统采样模块
 - 基础状态布局、平台 helper、layout / events / sidebar / session / tab / sftp panel / transfer / tunnel / terminal-input / terminal-render / model 的 UI glue 分别拆到 `src/app/state.rs`、`src/app/types.rs`、`src/app/platform.rs`、`src/app/layout.rs`、`src/app/events.rs`、`src/app/sidebar.rs`、`src/app/sessions.rs`、`src/app/tabs.rs`、`src/app/sftp_panel.rs`、`src/app/transfer.rs`、`src/app/tunnels.rs`、`src/app/terminal_input.rs`、`src/app/terminal_render.rs` 和 `src/app/models.rs`；legacy vt100 引擎核心放在 `src/terminal/legacy.rs`
@@ -92,6 +92,8 @@
 - `build_row(...)`
 - `detect_scroll(...)`
 - `impl LegacyTerminalEngine`
+- `LegacyTerminalEngine::new_with_fallback(...)`
+- `LegacyTerminalEngine::try_create_alacritty(...)`
 - `impl TerminalEngine for LegacyTerminalEngine`
 - `vt_color_to_slint(...)`
 - `vt_bg_to_slint(...)`
@@ -121,11 +123,13 @@
 ### `src/app/terminal_input.rs`
 职责：
 - 保存终端按键、鼠标上报、resize、剪贴板和选区交互的 UI glue
+- 按当前 active terminal engine 的 `application_cursor` / `mouse_reporting` / `bracketed_paste` 能力切换方向键、SGR mouse 和粘贴包装
 - 只负责把 Slint 事件转成 PTY 字节、终端窗口尺寸、剪贴板操作和重新绘制调用，不触碰 SSH / SFTP / tunnel / render 引擎本体
 
 关键符号：
 - `wire_key_input(...)`
 - `key_to_pty_bytes(...)`
+- `clipboard_payload(...)`
 - `sgr_mouse_sequence(...)`
 - `is_vk_back_down(...)`
 - `c0_letter_key_down(...)`
@@ -165,7 +169,7 @@
 职责：
 - 保存会话列表模型同步和会话对话框 / 连接入口的 UI glue
 - 负责把 `ConfigStore`、会话模型和连接启动逻辑接到 Slint 回调
-- `connect-session` 回调里即时读取 `ConfigStore::terminal_engine_mode()`，因此设置里的终端引擎切换只影响新建会话，不影响已有 tab / reconnect
+- `connect-session` 回调里即时读取 `ConfigStore::terminal_engine_mode()`，并在 Alacritty 初始化失败时把当前新建会话回退到 Legacy；因此设置里的终端引擎切换只影响新建会话，不影响已有 tab / reconnect
 
 关键符号：
 - `sync_sessions_to_model(...)`
@@ -319,7 +323,7 @@
 ### `src/terminal/engine.rs`
 职责：
 - 定义最小 `TerminalEngine` trait
-- 定义 `TerminalEngineMode`，支持 `legacy` / `alacritty` 字符串、环境变量 `MEATSHELL_TERMINAL_ENGINE` 读取，以及 `mouse_reporting` / `application_cursor` / `bracketed_paste` 能力查询
+- 定义 `TerminalEngineMode`，支持 `legacy` / `alacritty` 字符串，以及 `mouse_reporting` / `application_cursor` / `bracketed_paste` 能力查询
 - trait 由 `src/terminal/legacy.rs` 中的 `LegacyTerminalEngine` wrapper 和 `src/terminal/alacritty.rs` 中的实验引擎实现
 
 关键符号：
@@ -344,7 +348,7 @@
 
 定位提示：
 - 实验引擎显示、颜色、宽字符或 resize 问题，先看这里
-- app 侧切换逻辑只看 `src/terminal/legacy.rs::LegacyTerminalEngine::new(...)` 和 `TerminalEngine` impl
+- app 侧切换和回退逻辑只看 `src/terminal/legacy.rs::LegacyTerminalEngine::new_with_fallback(...)`、`try_create_alacritty(...)` 和 `TerminalEngine` impl
 
 ### `src/ssh.rs`
 职责：
@@ -429,7 +433,7 @@
 职责：
 - 会话配置落盘与读取
 - 凭据包装
-- 下载目录、UI 语言、默认终端引擎，以及每个 Session 的可选出站代理持久化
+- 下载目录、UI 语言、默认终端引擎，以及每个 Session 的可选出站代理持久化；默认终端引擎缺省为 Alacritty
 
 关键符号：
 - `Secret`

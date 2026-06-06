@@ -8,7 +8,7 @@ use crate::config::{AuthMethod, ConfigStore, Secret, Session};
 use crate::i18n::t;
 use crate::sftp::spawn_sftp;
 use crate::ssh::SessionEvent;
-use crate::terminal::engine::TerminalEngine;
+use crate::terminal::engine::{TerminalEngine, TerminalEngineMode};
 
 use super::events::{spawn_sftp_event_pump, spawn_shell_event_pump};
 use super::types::{
@@ -328,7 +328,8 @@ pub(super) fn wire_session_callbacks(
                     VecModel::<SftpTreeNode>::default(),
                 )),
             });
-            let buf = TermBuffer::new(24, 80, 5000, terminal_engine_mode);
+            let (buf, effective_mode) =
+                TermBuffer::new_with_fallback(24, 80, 5000, terminal_engine_mode);
             tracing::info!(
                 "new terminal tab {} using {} engine",
                 tab_id,
@@ -341,6 +342,16 @@ pub(super) fn wire_session_callbacks(
                 .insert(tab_id.clone(), false);
             if let Some(w) = weak.upgrade() {
                 w.set_active_tab_id(tab_id.clone().into());
+                if terminal_engine_mode == TerminalEngineMode::Alacritty
+                    && effective_mode == TerminalEngineMode::Legacy
+                {
+                    let message = t(
+                        "Alacritty 初始化失败，当前会话已回退到 Legacy",
+                        "Alacritty initialization failed; this session fell back to Legacy",
+                    );
+                    w.set_settings_hint(message.into());
+                    w.set_ssh_import_hint(message.into());
+                }
             }
 
             let (initial_cols, initial_rows) = *last_term_size.lock().unwrap();

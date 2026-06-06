@@ -91,7 +91,7 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 | UI            | [Slint](https://slint.dev)（纯 Rust 编译，无 GC）                 |
 | 异步运行时    | [`tokio`](https://tokio.rs)                                       |
 | SSH 协议      | [`russh`](https://crates.io/crates/russh)（无 libssh 依赖）       |
-| 终端解析      | 默认 legacy `vt100` fallback；[`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) 为 Experimental 主线优化方向 |
+| 终端解析      | 默认优先 [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal)；初始化失败时回退到 legacy `vt100` fallback |
 | 隧道转发      | `russh` direct-tcpip + `tokio` TCP 转发                         |
 | 系统指标      | [`sysinfo`](https://crates.io/crates/sysinfo)                     |
 | 序列化        | `serde` + `serde_json`                                            |
@@ -103,19 +103,7 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 cargo run --release
 ```
 
-终端引擎默认使用 legacy fallback。设置菜单或 `sessions.json` 可保存默认引擎，但只对**新建会话**生效；已打开的 tab 和 reconnect 不会热切换。
-
-`MEATSHELL_TERMINAL_ENGINE` 仍然优先于配置文件；需要强制覆盖时，启动前设置环境变量：
-
-```bash
-MEATSHELL_TERMINAL_ENGINE=alacritty cargo run --release
-```
-
-PowerShell：
-
-```powershell
-$env:MEATSHELL_TERMINAL_ENGINE = "alacritty"; cargo run --release
-```
+终端引擎默认优先使用 Alacritty；如果初始化失败，会对当前新建会话自动回退到 Legacy，并在 GUI 中提示。设置菜单或 `sessions.json` 可保存默认引擎，但只对**新建会话**生效；已打开的 tab 和 reconnect 不会热切换。
 
 首次启动会建立空的会话库。点击右上角 **“＋ 新建会话”** 添加第一台服务器。
 
@@ -124,7 +112,7 @@ $env:MEATSHELL_TERMINAL_ENGINE = "alacritty"; cargo run --release
 - 顶部工具栏：切换左侧资源栏、切换底部面板、断开当前 tab、重连当前 tab、打开独立文件传输窗口。
 - 文件传输窗口：在已连接的终端 tab 上点击工具栏文件传输按钮，左侧浏览本机目录，右侧浏览当前远程 session，支持基础上传/下载。
 - 隧道：底部 **“隧道”** 页签支持 Local Forward。新增规则后填写 `本地地址:端口 -> 远端地址:端口`，保存并启用；该 session 下 enabled 规则会在终端连接成功后自动启动，断开或关闭 tab 时停止。
-- 终端引擎：默认使用 legacy fallback；设置菜单可保存默认引擎，效果只作用于新建会话；`MEATSHELL_TERMINAL_ENGINE` 会覆盖配置；Alacritty 仍按 Experimental / 主线优化中处理。
+- 终端引擎：默认优先使用 Alacritty；初始化失败时当前新建会话会回退到 Legacy 并提示；设置菜单可保存默认引擎，效果只作用于新建会话；Alacritty 仍按 Experimental / 主线优化中处理。
 
 ## 配置文件
 
@@ -136,7 +124,7 @@ $env:MEATSHELL_TERMINAL_ENGINE = "alacritty"; cargo run --release
 - Linux：`~/.config/meatshell`
 - macOS：`~/Library/Application Support/dev.meatshell.meatshell`
 
-终端引擎默认值可通过设置菜单或 `sessions.json` 顶层 `terminal_engine` 保存；该设置只对新建会话生效。`MEATSHELL_TERMINAL_ENGINE` 仍然优先于配置文件。侧边栏/底部面板默认显示状态暂不持久化。
+终端引擎默认值可通过设置菜单或 `sessions.json` 顶层 `terminal_engine` 保存；缺省值为 `alacritty`，若初始化失败则当前新建会话回退到 `legacy`。该设置只对新建会话生效。侧边栏/底部面板默认显示状态暂不持久化。
 
 ## 项目布局
 

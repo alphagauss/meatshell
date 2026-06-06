@@ -234,15 +234,11 @@ impl ConfigStore {
     }
 
     pub fn terminal_engine_mode(&self) -> TerminalEngineMode {
-        if let Some(mode) = TerminalEngineMode::from_env() {
-            return mode;
-        }
-
         self.cache
             .terminal_engine
             .as_deref()
             .map(TerminalEngineMode::from_str)
-            .unwrap_or(TerminalEngineMode::Legacy)
+            .unwrap_or(TerminalEngineMode::Alacritty)
     }
 
     pub fn set_terminal_engine_mode(&mut self, mode: TerminalEngineMode) {
@@ -258,5 +254,31 @@ impl ConfigStore {
         fs::rename(&tmp, &self.path)
             .with_context(|| format!("failed to finalise {}", self.path.display()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_engine_defaults_to_alacritty_when_unset() {
+        let store = ConfigStore {
+            path: PathBuf::new(),
+            cache: ConfigFile::default(),
+        };
+        assert_eq!(store.terminal_engine_mode(), TerminalEngineMode::Alacritty);
+    }
+
+    #[test]
+    fn terminal_engine_uses_saved_value_when_present() {
+        let store = ConfigStore {
+            path: PathBuf::new(),
+            cache: ConfigFile {
+                terminal_engine: Some("legacy".to_string()),
+                ..ConfigFile::default()
+            },
+        };
+        assert_eq!(store.terminal_engine_mode(), TerminalEngineMode::Legacy);
     }
 }

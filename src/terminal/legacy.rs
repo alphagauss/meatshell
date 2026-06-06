@@ -92,20 +92,52 @@ pub fn build_row(screen: &vt100::Screen, r: u16, cols: u16) -> Line {
 }
 
 impl LegacyTerminalEngine {
-    pub fn new(rows: u16, cols: u16, scrollback: usize, mode: TerminalEngineMode) -> Self {
-        Self {
-            parser: vt100::Parser::new(rows, cols, scrollback),
-            alacritty: match mode {
-                TerminalEngineMode::Legacy => None,
-                TerminalEngineMode::Alacritty => Some(AlacrittyTerminalEngine::new(rows, cols)),
+    pub fn new_with_fallback(
+        rows: u16,
+        cols: u16,
+        scrollback: usize,
+        mode: TerminalEngineMode,
+    ) -> (Self, TerminalEngineMode) {
+        let alacritty = match mode {
+            TerminalEngineMode::Legacy => None,
+            TerminalEngineMode::Alacritty => Self::try_create_alacritty(rows, cols),
+        };
+        let effective_mode = if alacritty.is_some() {
+            TerminalEngineMode::Alacritty
+        } else {
+            TerminalEngineMode::Legacy
+        };
+        (
+            Self {
+                parser: vt100::Parser::new(rows, cols, scrollback),
+                alacritty,
+                find_query: String::new(),
+                sel: None,
+                history: Vec::new(),
+                prev: Vec::new(),
+                view_offset: 0,
+                displayed_text: RefCell::new(Vec::new()),
+                csi_state: CsiState::Normal,
             },
-            find_query: String::new(),
-            sel: None,
-            history: Vec::new(),
-            prev: Vec::new(),
-            view_offset: 0,
-            displayed_text: RefCell::new(Vec::new()),
-            csi_state: CsiState::Normal,
+            effective_mode,
+        )
+    }
+
+    pub fn try_create_alacritty(rows: u16, cols: u16) -> Option<AlacrittyTerminalEngine> {
+        match std::panic::catch_unwind(|| AlacrittyTerminalEngine::new(rows, cols)) {
+            Ok(engine) => Some(engine),
+            Err(_) => {
+                tracing::warn!("failed to initialize alacritty engine; falling back to legacy");
+                None
+            }
+        }
+    }
+
+    pub fn current_mode(&self) -> TerminalEngineMode {
+        if self.alacritty.is_some() {
+            TerminalEngineMode::Alacritty
+        } else {
+            TerminalEngineMode::Legacy
         }
     }
 
@@ -351,10 +383,7 @@ impl LegacyTerminalEngine {
 
 impl TerminalEngine for LegacyTerminalEngine {
     fn mode(&self) -> TerminalEngineMode {
-        self.alacritty
-            .as_ref()
-            .map(|engine| engine.mode())
-            .unwrap_or(TerminalEngineMode::Legacy)
+        self.current_mode()
     }
 
     fn ingest(&mut self, bytes: &[u8]) {
@@ -515,5 +544,19 @@ fn idx_to_rgb(i: u8, bold: bool) -> (u8, u8, u8) {
             let v = 8 + (i - 232) * 10;
             (v, v, v)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_mode_stays_legacy_without_alacritty_delegate() {
+        let (engine, effective_mode) =
+            LegacyTerminalEngine::new_with_fallback(24, 80, 5000, TerminalEngineMode::Legacy);
+        assert_eq!(effective_mode, TerminalEngineMode::Legacy);
+        assert!(engine.alacritty.is_none());
+        assert_eq!(engine.current_mode(), TerminalEngineMode::Legacy);
     }
 }

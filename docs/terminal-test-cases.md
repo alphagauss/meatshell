@@ -7,11 +7,16 @@
 
 ## 0. Alacritty 启动与冒烟
 
-- [ ] `MEATSHELL_TERMINAL_ENGINE=alacritty cargo run`
+- [ ] `cargo run`
 - [ ] `echo hello`
 - [ ] `clear`
 - [ ] 中文输出
 - [ ] emoji 输出
+- [ ] `PowerShell` 方向键历史 / `Home` / `End`
+- [ ] `Insert` / `Delete` / `PageUp` / `PageDown`
+- [ ] `F1-F12`
+- [ ] `Ctrl+C` / `Ctrl+D` / `Alt+字母`
+- [ ] 普通粘贴 / 多行粘贴 / bracketed paste
 - [ ] `vim`
 - [ ] `nano`
 - [ ] `less`
@@ -19,6 +24,7 @@
 - [ ] `tmux`
 - [ ] PowerShell
 - [ ] resize
+- [ ] Alacritty 初始化失败时，新建会话回退到 Legacy 并出现 GUI 提示
 
 ## 1. 普通 shell
 
@@ -60,12 +66,14 @@
 ## 5. 输入
 
 - [ ] 方向键
+- [ ] application cursor mode（`vim` / `nano` / `tmux` 内方向键）
 - [ ] `Home` / `End`
 - [ ] `PageUp` / `PageDown`
 - [ ] `Insert` / `Delete`
 - [ ] `F1-F12`
 - [ ] `Ctrl+C`
 - [ ] `Ctrl+D`
+- [ ] `Ctrl+A-Z`
 - [ ] `Alt+字母`
 
 ## 6. 鼠标
@@ -88,3 +96,4 @@
 - [ ] 普通粘贴
 - [ ] 多行粘贴
 - [ ] bracketed paste
+- [ ] `vim` / `nano` / `tmux` 内 bracketed paste
