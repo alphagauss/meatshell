@@ -2146,7 +2146,7 @@ fn refresh_sidebar(
         // Disconnected / timed-out session.
         Some(st) if st.state == 2 => {
             win.set_conn_state(2);
-            win.set_connection_state(format!("{} {}", st.host, t("已断开", "disconnected")).into());
+            win.set_connection_state(format!("{} {}", st.host, t("已断开", "Disconnected")).into());
             win.set_resource_title(t("服务器资源", "Server resources").into());
             clear_stats(win);
             set_top_local(win);

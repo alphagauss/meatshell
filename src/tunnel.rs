@@ -47,9 +47,9 @@ pub enum TunnelStatus {
 impl TunnelStatus {
     pub fn text(&self) -> String {
         match self {
-            TunnelStatus::Stopped => t("已停止", "Stopped").to_string(),
-            TunnelStatus::Starting => t("启动中", "Starting").to_string(),
-            TunnelStatus::Running => t("运行中", "Running").to_string(),
+            TunnelStatus::Stopped => t("已断开", "Disconnected").to_string(),
+            TunnelStatus::Starting => t("连接中", "Connecting").to_string(),
+            TunnelStatus::Running => t("已连接", "Connected").to_string(),
             TunnelStatus::Reconnecting => t("重连中", "Reconnecting").to_string(),
             TunnelStatus::Failed(err) => {
                 format!("{}: {err}", t("失败", "Failed"))
@@ -401,7 +401,12 @@ async fn connect_and_serve(
     let bind_addr = format!("{}:{}", rule.local_host, rule.local_port);
     let listener = TcpListener::bind((rule.local_host.as_str(), rule.local_port))
         .await
-        .with_context(|| format!("listen {bind_addr}"))?;
+        .with_context(|| {
+            format!(
+                "{} {bind_addr}",
+                t("本地端口不可用", "local port unavailable")
+            )
+        })?;
     send_status(events, &rule.id, TunnelStatus::Running);
     let mut forwards = JoinSet::new();
 

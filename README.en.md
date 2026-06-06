@@ -120,15 +120,30 @@ PowerShell:
 $env:MEATSHELL_TERMINAL_ENGINE = "alacritty"; cargo run --release
 ```
 
-On first launch an empty session store is created at
-`%APPDATA%/meatshell/sessions.json`. Click **"＋ New Session"** in the top-right
-to add your first server.
+On first launch an empty session store is created. Click **"＋ New Session"** in
+the top-right to add your first server.
 
-The bottom **Tunnels** tab supports first-pass Local Forward rules. Add a rule,
-fill `local host:port -> remote host:port`, save it, then enable it. Enabled
-rules for the session start after the terminal SSH connection succeeds and stop
-when the tab disconnects or closes. Rules are stored separately in
-`tunnels.json`, not in `sessions.json`.
+## Common Features
+
+- Top toolbar: toggle the resource sidebar, toggle the bottom panel, disconnect the current tab, reconnect the current tab, and open the independent file-transfer window.
+- File-transfer window: from a connected terminal tab, click the transfer toolbar button. The left side browses local files, the right side browses the current remote session, with basic upload/download support.
+- Tunnels: the bottom **Tunnels** tab supports Local Forward rules. Add a rule, fill `local host:port -> remote host:port`, save it, then enable it. Enabled rules for the session start after the terminal SSH connection succeeds and stop when the tab disconnects or closes.
+- Terminal engine: legacy `vt100` is the default; set `MEATSHELL_TERMINAL_ENGINE=alacritty` before launch to try the experimental alacritty engine.
+
+## Configuration Files
+
+`sessions.json` stores sessions, language, and the download directory.
+`tunnels.json` stores tunnel rules separately, outside the session structure.
+
+Default configuration directories:
+
+- Windows: `%APPDATA%\meatshell\meatshell\config`
+- Linux: `~/.config/meatshell`
+- macOS: `~/Library/Application Support/dev.meatshell.meatshell`
+
+The terminal engine mode is currently controlled only by the launch-time
+environment variable. Sidebar and bottom-panel default visibility are not
+persisted yet.
 
 ## Project layout
 

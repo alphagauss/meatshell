@@ -115,13 +115,26 @@ PowerShell：
 $env:MEATSHELL_TERMINAL_ENGINE = "alacritty"; cargo run --release
 ```
 
-首次启动会在 `%APPDATA%/meatshell/sessions.json` 建立空的会话库。点击右上
-角 **“＋ 新建会话”** 添加第一台服务器。
+首次启动会建立空的会话库。点击右上角 **“＋ 新建会话”** 添加第一台服务器。
 
-底部面板的 **“隧道”** 页签支持第一版 Local Forward：新增规则后填写
-`本地地址:端口 -> 远端地址:端口`，保存并启用；该 session 下 enabled 规则会在
-终端连接成功后自动启动，断开或关闭 tab 时停止。规则单独保存到
-`tunnels.json`，不写入 `sessions.json`。
+## 常用功能
+
+- 顶部工具栏：切换左侧资源栏、切换底部面板、断开当前 tab、重连当前 tab、打开独立文件传输窗口。
+- 文件传输窗口：在已连接的终端 tab 上点击工具栏文件传输按钮，左侧浏览本机目录，右侧浏览当前远程 session，支持基础上传/下载。
+- 隧道：底部 **“隧道”** 页签支持 Local Forward。新增规则后填写 `本地地址:端口 -> 远端地址:端口`，保存并启用；该 session 下 enabled 规则会在终端连接成功后自动启动，断开或关闭 tab 时停止。
+- 终端引擎：默认使用 legacy `vt100`；启动前设置 `MEATSHELL_TERMINAL_ENGINE=alacritty` 可切换到实验 alacritty 引擎。
+
+## 配置文件
+
+`sessions.json` 保存会话、语言和下载目录；`tunnels.json` 单独保存隧道规则，不写入会话结构。
+
+默认配置目录：
+
+- Windows：`%APPDATA%\meatshell\meatshell\config`
+- Linux：`~/.config/meatshell`
+- macOS：`~/Library/Application Support/dev.meatshell.meatshell`
+
+终端引擎模式目前只由启动前环境变量控制；侧边栏/底部面板默认显示状态暂不持久化。
 
 ## 项目布局
 
