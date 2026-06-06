@@ -23,7 +23,7 @@
 
 ## 2. 先看哪个文件
 
-- 改终端显示、选区、搜索、高亮、拖拽上传、Tab 切换、回调绑定：先看 `src/app.rs`，再看 `ui/app.slint` 和 `ui/terminal_view.slint`
+- 改终端显示、选区、搜索、高亮、拖拽上传、Tab 切换、回调绑定：先看 `src/app.rs`，再看 `ui/app.slint` 和 `ui/terminal_view.slint`；终端缩窗后的回滚保留也在 `src/app.rs` 的 `wire_key_input(...)`
 - 改 SSH 连接、认证、远端监控、OSC7 路径解析、出站代理：先看 `src/ssh.rs` 和 `src/proxy.rs`
 - 改 SFTP 列表、树形目录、下载 / 上传 / 删除 / 打开文件、出站代理：先看 `src/sftp.rs` 和 `src/proxy.rs`，再看 `ui/sftp_panel.slint`
 - 改会话持久化、密码字段、代理字段、下载目录、语言配置：先看 `src/config.rs`
@@ -156,7 +156,7 @@
 - `list_dir_impl(...)`
 - `list_dirs_only_impl(...)`
 - `download_impl(...)`
-- `upload_impl(...)`
+- `upload_pipelined(...)`
 - `spawn_edit_watcher(...)`
 - `emit_transfer(...)`
 - `base_name(...)`
@@ -168,7 +168,7 @@
 定位提示：
 - SFTP 列表和树不一致，先看 `build_tree_nodes(...)` 和 `list_dir_impl(...)`
 - SFTP 连接和代理问题，先看 `run_sftp(...)` / `src/proxy.rs`
-- 下载 / 上传进度条问题，先看 `emit_transfer(...)`、`download_impl(...)`、`upload_impl(...)`
+- 下载 / 上传进度条问题，先看 `emit_transfer(...)`、`download_impl(...)`、`upload_pipelined(...)`
 - “查看 / 编辑” 的临时文件安全问题，先看 `sanitize_filename(...)` 和 `open_with_os(...)`
 
 ### `src/config.rs`
