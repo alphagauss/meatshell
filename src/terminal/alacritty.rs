@@ -5,8 +5,8 @@ use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor, Rgb};
 
-use crate::terminal_engine::TerminalEngine;
-use crate::terminal_types::{BuiltScreen, RenderSpan};
+use super::engine::TerminalEngine;
+use super::types::{BuiltScreen, RenderSpan};
 
 struct AlacrittyDimensions {
     columns: usize,

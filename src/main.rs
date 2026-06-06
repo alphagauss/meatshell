@@ -14,9 +14,7 @@ mod sftp;
 mod ssh;
 mod ssh_config;
 mod system;
-mod terminal_alacritty;
-mod terminal_engine;
-mod terminal_types;
+mod terminal;
 mod tunnel;
 
 fn main() -> anyhow::Result<()> {
