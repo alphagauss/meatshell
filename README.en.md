@@ -76,6 +76,7 @@ xattr -dr com.apple.quarantine meatshell     # clear the "unsigned app" Gatekeep
 - [x] Top toolbar shell: sidebar, bottom panel, disconnect, reconnect, transfer entry
 - [x] Bottom Files / Tunnels tab shell (Files continues to use the SFTP panel)
 - [x] Basic SGR mouse reporting for the experimental alacritty engine (left click, release, wheel)
+- [x] First independent file-transfer window (local/remote split view, basic upload/download)
 - [ ] Known-hosts (`known_hosts`) verification
 - [ ] Store session passwords in the OS keychain
 
@@ -136,6 +137,9 @@ meatshell/
 │   ├── top_action_bar.slint # toolbar below the tab bar
 │   ├── bottom_panel.slint   # bottom Files / Tunnels tab shell
 │   ├── tunnel_panel.slint   # tunnel tab empty state
+│   ├── transfer_window.slint # independent file-transfer window
+│   ├── local_file_panel.slint # transfer local panel
+│   ├── remote_file_panel.slint # transfer remote panel
 │   ├── welcome.slint        # welcome page / quick connect
 │   ├── session_dialog.slint # new / edit session dialog
 │   └── terminal_view.slint  # terminal view (v0.1 line-buffered)
@@ -144,6 +148,7 @@ meatshell/
     ├── app.rs               # UI ↔ backend bridge
     ├── connection.rs        # connection runtime, disconnect, reconnect entry
     ├── config.rs            # session JSON persistence
+    ├── file_transfer.rs     # transfer-window local directory helper
     ├── terminal_alacritty.rs # experimental alacritty terminal engine
     ├── terminal_engine.rs   # terminal engine trait
     ├── terminal_types.rs    # terminal render data types

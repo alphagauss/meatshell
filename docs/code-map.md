@@ -23,6 +23,7 @@
 7. `src/app_state.rs` 保存少量跨组件 UI 布局状态，当前只覆盖侧边栏、底部面板显示和底部面板页签
 8. `src/connection.rs` 保存每个终端 tab 的连接运行态，统一包装 SSH session 的连接、断开、重连和状态
 9. `src/terminal_types.rs` / `src/terminal_engine.rs` 定义终端渲染数据、引擎模式和最小终端引擎 trait；`src/terminal_alacritty.rs` 提供可选实验 alacritty 引擎
+10. `src/file_transfer.rs` 和 `ui/transfer_window.slint` 提供独立文件传输窗口第一版；远程侧复用 `src/sftp.rs` worker
 
 ## 2. 先看哪个文件
 
@@ -32,6 +33,7 @@
 - 改 SSH 连接运行态、断开、重连、连接状态入口：先看 `src/connection.rs`，再看 `src/app.rs` 和 `src/ssh.rs`
 - 改 SSH 认证、远端监控、OSC7 路径解析、出站代理：先看 `src/ssh.rs` 和 `src/proxy.rs`
 - 改 SFTP 列表、树形目录、下载 / 上传 / 删除 / 打开文件、出站代理：先看 `src/sftp.rs` 和 `src/proxy.rs`，再看 `ui/sftp_panel.slint`
+- 改独立文件传输窗口、本地目录浏览、双栏上传/下载：先看 `src/file_transfer.rs`、`src/app.rs` 的 `open_transfer_window(...)`，再看 `ui/transfer_window.slint`、`ui/local_file_panel.slint`、`ui/remote_file_panel.slint`
 - 改会话持久化、密码字段、代理字段、下载目录、语言配置：先看 `src/config.rs`
 - 改本机 CPU / 内存 / 网络 / 磁盘侧边栏：先看 `src/system.rs` 和 `ui/sidebar.slint`
 - 改语言、翻译、`@tr(...)` 文案：先看 `src/i18n.rs`、`build.rs`、`lang/*`、`ui/*.slint`
@@ -60,6 +62,11 @@
 - `wire_tab_callbacks(...)`
 - `wire_sftp_callbacks(...)`
 - `wire_key_input(...)`
+- `open_transfer_window(...)`
+- `wire_transfer_window_callbacks(...)`
+- `spawn_transfer_sftp_event_pump(...)`
+- `apply_transfer_event_to_window(...)`
+- `refresh_transfer_local(...)`
 - `apply_session_event_to_window(...)`
 - `refresh_sidebar(...)`
 - `rebuild_tab_display(...)`
@@ -87,6 +94,8 @@
 - `CsiState`
 - `TabStatus`
 - `TermBuffers`
+- `TransferWindowState`
+- `TransferWindows`
 - `SftpHandles`
 - `SftpManualNav`
 - `TabStatuses`
@@ -127,6 +136,18 @@
 - `SessionRuntime`
 - `SessionLaunch`
 - `ConnectionManager`
+
+### `src/file_transfer.rs`
+职责：
+- 独立文件传输窗口的本地文件系统 helper
+- 用 `std::fs::read_dir` 列本地目录，并排序为目录优先
+- 解析本地上级目录和默认本地目录；远程传输仍由 `src/sftp.rs` 负责
+
+关键符号：
+- `LocalFileEntry`
+- `default_local_dir(...)`
+- `resolve_local_path(...)`
+- `list_local_dir(...)`
 
 ### `src/terminal_types.rs`
 职责：
@@ -340,6 +361,7 @@
 关键符号：
 - `AppWindow`
 - `TransferInfo`
+- `TransferWindow`
 - `TerminalState`
 - `toggle-sidebar`
 - `toggle-bottom-panel`
@@ -399,6 +421,31 @@
 
 关键符号：
 - `TunnelPanel`
+
+### `ui/transfer_window.slint`
+职责：
+- 独立文件传输窗口外壳
+- 左侧承载 `LocalFilePanel`，右侧承载 `RemoteFilePanel`
+- 暴露本地/远程导航、刷新、上传、下载、关闭回调给 `src/app.rs`
+
+关键符号：
+- `TransferWindow`
+
+### `ui/local_file_panel.slint`
+职责：
+- 文件传输窗口左侧本机目录列表
+- 支持进入目录、返回上级、刷新，以及上传本地文件到当前远程目录
+
+关键符号：
+- `LocalFilePanel`
+
+### `ui/remote_file_panel.slint`
+职责：
+- 文件传输窗口右侧远程目录列表
+- 支持进入目录、返回上级、刷新，以及下载远程文件到当前本地目录
+
+关键符号：
+- `RemoteFilePanel`
 
 ### `ui/sidebar.slint`
 职责：
@@ -488,6 +535,7 @@
 
 - SSH 连接 / 认证 / 代理：`src/ssh.rs` -> `src/proxy.rs` -> `src/config.rs`
 - SFTP 列表 / 下载 / 上传 / 删除 / 代理：`src/sftp.rs` -> `src/proxy.rs` -> `ui/sftp_panel.slint`
+- 独立文件传输窗口：`src/app.rs` -> `src/file_transfer.rs` / `src/sftp.rs` -> `ui/transfer_window.slint`
 - 终端显示 / 搜索 / 选区：`src/app.rs` -> `ui/terminal_view.slint`
 - 侧边栏资源数据：`src/system.rs`、`src/ssh.rs` -> `ui/sidebar.slint`
 - 会话导入 / 编辑：`src/ssh_config.rs`、`src/config.rs` -> `ui/session_dialog.slint`、`ui/welcome.slint`

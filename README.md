@@ -72,6 +72,7 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 - [x] 顶部工具栏骨架：侧边栏、底部面板、断开、重连、文件传输入口
 - [x] 底部“文件 / 隧道”页签骨架（文件页继续使用 SFTP 面板）
 - [x] alacritty 实验引擎的基础 SGR 鼠标上报（左键、释放、滚轮）
+- [x] 独立文件传输窗口第一版（本地/远程双栏、基础上传下载）
 - [ ] 已知主机 (known_hosts) 校验
 - [ ] 会话密码使用 OS 钥匙串存储
 
@@ -130,6 +131,9 @@ meatshell/
 │   ├── top_action_bar.slint # 标签页下方工具栏
 │   ├── bottom_panel.slint   # 底部文件 / 隧道页签外壳
 │   ├── tunnel_panel.slint   # 隧道页签空状态
+│   ├── transfer_window.slint # 独立文件传输窗口
+│   ├── local_file_panel.slint # 文件传输本地面板
+│   ├── remote_file_panel.slint # 文件传输远程面板
 │   ├── welcome.slint        # 欢迎页 / 快速连接
 │   ├── session_dialog.slint # 新建 / 编辑会话弹框
 │   └── terminal_view.slint  # 终端视图（v0.1 行缓冲）
@@ -138,6 +142,7 @@ meatshell/
     ├── app.rs               # UI ↔ 后端桥接
     ├── connection.rs        # 连接运行态、断开、重连入口
     ├── config.rs            # 会话 JSON 持久化
+    ├── file_transfer.rs     # 文件传输窗口本地目录 helper
     ├── terminal_alacritty.rs # alacritty 实验终端引擎
     ├── terminal_engine.rs   # 终端引擎 trait
     ├── terminal_types.rs    # 终端渲染数据类型

@@ -1,0 +1,182 @@
+import { Theme } from "theme.slint";
+import { ScrollView } from "std-widgets.slint";
+import { SftpEntry } from "sftp_panel.slint";
+
+export component LocalFilePanel inherits Rectangle {
+    in property <string> current-path;
+    in property <[SftpEntry]> entries;
+    in property <string> status;
+
+    callback navigate(string);
+    callback refresh();
+    callback upload(string);
+
+    background: Theme.bg-panel;
+
+    VerticalLayout {
+        spacing: 0;
+
+        Rectangle {
+            height: 30px;
+            background: Theme.bg-panel-alt;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 6px;
+                spacing: 4px;
+                Text {
+                    text: root.current-path;
+                    color: Theme.text-primary;
+                    font-size: Theme.fs-sm;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    width: 24px;
+                    height: 22px;
+                    border-radius: Theme.radius-sm;
+                    background: up-ta.has-hover ? Theme.bg-hover : transparent;
+                    up-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.navigate(".."); }
+                    }
+                    Text {
+                        text: "\u{E5D8}";
+                        font-family: "Material Icons";
+                        color: Theme.text-secondary;
+                        font-size: Theme.fs-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle {
+                    width: 24px;
+                    height: 22px;
+                    border-radius: Theme.radius-sm;
+                    background: ref-ta.has-hover ? Theme.bg-hover : transparent;
+                    ref-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.refresh(); }
+                    }
+                    Text {
+                        text: "\u{E5D5}";
+                        font-family: "Material Icons";
+                        color: Theme.text-secondary;
+                        font-size: Theme.fs-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 22px;
+            background: Theme.bg-root;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 8px;
+                Text { text: @tr("Local"); color: Theme.text-muted; font-size: Theme.fs-xs; horizontal-stretch: 1; vertical-alignment: center; }
+                Text { text: @tr("Size"); color: Theme.text-muted; font-size: Theme.fs-xs; width: 72px; horizontal-alignment: right; vertical-alignment: center; }
+                Rectangle { width: 28px; }
+            }
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 0;
+                if root.entries.length == 0 : Rectangle {
+                    height: 42px;
+                    Text {
+                        text: @tr("Empty directory");
+                        color: Theme.text-muted;
+                        font-size: Theme.fs-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                for entry[i] in root.entries : Rectangle {
+                    height: 26px;
+                    background: row-ta.has-hover ? #4a90e225 : (mod(i, 2) == 0 ? transparent : #ffffff08);
+                    row-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        double-clicked => {
+                            if (entry.is-dir) {
+                                root.navigate(entry.full-path);
+                            } else {
+                                root.upload(entry.full-path);
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 6px;
+                        spacing: 6px;
+                        Text {
+                            text: entry.is-dir ? "\u{E2C7}" : "\u{E24D}";
+                            font-family: "Material Icons";
+                            color: entry.is-dir ? Theme.accent : Theme.text-secondary;
+                            font-size: Theme.fs-sm;
+                            width: 16px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: entry.name;
+                            color: entry.is-dir ? Theme.accent : Theme.text-primary;
+                            font-size: Theme.fs-sm;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: entry.is-dir ? "" : entry.size;
+                            color: Theme.text-secondary;
+                            font-size: Theme.fs-xs;
+                            width: 72px;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                        Rectangle {
+                            width: 28px;
+                            height: 22px;
+                            border-radius: Theme.radius-sm;
+                            background: !entry.is-dir && upload-ta.has-hover ? Theme.bg-hover : transparent;
+                            upload-ta := TouchArea {
+                                enabled: !entry.is-dir;
+                                mouse-cursor: pointer;
+                                clicked => { root.upload(entry.full-path); }
+                            }
+                            Text {
+                                visible: !entry.is-dir;
+                                text: "\u{E2C3}";
+                                font-family: "Material Icons";
+                                color: Theme.text-secondary;
+                                font-size: Theme.fs-sm;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 20px;
+            background: Theme.bg-panel-alt;
+            Text {
+                x: 8px;
+                width: parent.width - 16px;
+                height: parent.height;
+                text: root.status;
+                color: Theme.text-muted;
+                font-size: Theme.fs-xs;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
