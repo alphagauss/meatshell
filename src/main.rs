@@ -6,6 +6,7 @@
 mod app;
 mod app_state;
 mod config;
+mod connection;
 mod i18n;
 mod proxy;
 mod sftp;

@@ -127,6 +127,7 @@ meatshell/
 └── src/
     ├── main.rs
     ├── app.rs               # UI ↔ backend bridge
+    ├── connection.rs        # connection runtime, disconnect, reconnect entry
     ├── config.rs            # session JSON persistence
     ├── system.rs            # CPU / memory / network sampling
     └── ssh.rs               # SSH session worker

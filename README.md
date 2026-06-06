@@ -122,6 +122,7 @@ meatshell/
 └── src/
     ├── main.rs
     ├── app.rs               # UI ↔ 后端桥接
+    ├── connection.rs        # 连接运行态、断开、重连入口
     ├── config.rs            # 会话 JSON 持久化
     ├── system.rs            # CPU / 内存 / 网络采样
     └── ssh.rs               # SSH 会话 worker

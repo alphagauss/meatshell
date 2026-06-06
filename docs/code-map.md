@@ -21,12 +21,14 @@
 5. `src/system.rs` 提供本机侧资源采样，`src/i18n.rs` 负责运行时语言切换
 6. `build.rs` 负责编译 Slint UI、打包翻译文件，并在 Windows 上嵌入图标
 7. `src/app_state.rs` 保存少量跨组件 UI 布局状态，当前只覆盖侧边栏、底部面板显示和底部面板页签
+8. `src/connection.rs` 保存每个终端 tab 的连接运行态，统一包装 SSH session 的连接、断开、重连和状态
 
 ## 2. 先看哪个文件
 
 - 改顶部工具栏、侧边栏/底部面板显隐、底部面板页签状态：先看 `src/app_state.rs`、`src/app.rs`、`ui/app.slint` 和 `ui/terminal_view.slint`
 - 改终端显示、选区、搜索、高亮、拖拽上传、Tab 切换、回调绑定：先看 `src/app.rs`，再看 `ui/app.slint` 和 `ui/terminal_view.slint`；终端缩窗后的回滚保留也在 `src/app.rs` 的 `wire_key_input(...)`
-- 改 SSH 连接、认证、远端监控、OSC7 路径解析、出站代理：先看 `src/ssh.rs` 和 `src/proxy.rs`
+- 改 SSH 连接运行态、断开、重连、连接状态入口：先看 `src/connection.rs`，再看 `src/app.rs` 和 `src/ssh.rs`
+- 改 SSH 认证、远端监控、OSC7 路径解析、出站代理：先看 `src/ssh.rs` 和 `src/proxy.rs`
 - 改 SFTP 列表、树形目录、下载 / 上传 / 删除 / 打开文件、出站代理：先看 `src/sftp.rs` 和 `src/proxy.rs`，再看 `ui/sftp_panel.slint`
 - 改会话持久化、密码字段、代理字段、下载目录、语言配置：先看 `src/config.rs`
 - 改本机 CPU / 内存 / 网络 / 磁盘侧边栏：先看 `src/system.rs` 和 `ui/sidebar.slint`
@@ -40,6 +42,7 @@
 职责：
 - 顶层 UI 状态机和 glue code
 - 初始化 `AppState`，并把默认布局状态同步到 Slint 窗口属性
+- 通过 `ConnectionManager` 管理每个终端 tab 的 SSH runtime
 - 维护 tabs / terminals / SFTP 状态
 - 处理终端渲染、搜索、选区、拖拽、侧边栏刷新
 - 把 Slint 回调路由到 SSH / SFTP / 配置 / 系统采样模块
@@ -48,6 +51,8 @@
 - `run()`
 - `sync_app_state_to_window(...)`
 - `wire_app_state_callbacks(...)`
+- `spawn_shell_event_pump(...)`
+- `spawn_sftp_event_pump(...)`
 - `wire_session_callbacks(...)`
 - `wire_tab_callbacks(...)`
 - `wire_sftp_callbacks(...)`
@@ -105,6 +110,19 @@
 关键符号：
 - `AppState`
 - `BottomPanelTab`
+
+### `src/connection.rs`
+职责：
+- 统一管理每个终端 tab 的 SSH 连接运行态
+- 包装现有 `ssh::spawn_session(...)` 和 `SessionHandle`
+- 提供连接、断开、重连、PTY 输入/resize 转发和状态更新入口
+- 用 generation 过滤重连后旧 worker 迟到事件
+
+关键符号：
+- `ConnectionStatus`
+- `SessionRuntime`
+- `SessionLaunch`
+- `ConnectionManager`
 
 ### `src/ssh.rs`
 职责：

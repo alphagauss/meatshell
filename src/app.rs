@@ -3,7 +3,7 @@
 //! Responsibilities:
 //!   * Load the config store and expose sessions to Slint.
 //!   * Drive the 1-Hz system sampler.
-//!   * Manage the tab list + per-tab `SessionHandle` map.
+//!   * Manage the tab list + per-tab connection runtime map.
 //!   * Route Slint callbacks to the right domain module.
 
 use std::cell::RefCell;
@@ -57,17 +57,18 @@ use anyhow::{Context, Result};
 use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use tokio::runtime::Runtime;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::app_state::{AppState, BottomPanelTab};
 use crate::config::{AuthMethod, ConfigStore, Secret, Session};
+use crate::connection::ConnectionManager;
 use crate::i18n::t;
 use crate::sftp::{spawn_sftp, SftpHandle};
-use crate::ssh::{
-    format_mtime, format_size, spawn_session, SessionCommand, SessionEvent, SessionHandle,
-};
+use crate::ssh::{format_mtime, format_size, SessionEvent};
 use crate::system::{format_bytes_per_sec, SystemSampler, SystemSnapshot};
 
 type SftpHandles = Arc<Mutex<HashMap<String, SftpHandle>>>;
+type ConnectionStore = Arc<Mutex<ConnectionManager>>;
 /// Per-tab flag: once the user explicitly navigates via the SFTP tree or
 /// toolbar, stop auto-syncing to the terminal's `cd` path.
 type SftpManualNav = Arc<Mutex<HashMap<String, bool>>>;
@@ -110,9 +111,8 @@ pub fn run() -> Result<()> {
         ConfigStore::load().context("failed to load config")?,
     ));
 
-    // Per-tab SSH handles (shell only; lives on Slint thread via Rc).
-    let handles: Rc<RefCell<HashMap<String, SessionHandle>>> =
-        Rc::new(RefCell::new(HashMap::new()));
+    // Per-tab terminal connection runtimes.
+    let connections: ConnectionStore = Arc::new(Mutex::new(ConnectionManager::new()));
 
     // Per-tab SFTP handles — Arc<Mutex> so the event-pump OS thread and the
     // Slint UI thread can both post SftpCommands.
@@ -176,8 +176,12 @@ pub fn run() -> Result<()> {
         &window,
         app_state.clone(),
         tabs_model.clone(),
-        handles.clone(),
+        connections.clone(),
+        bufs.clone(),
+        runtime.clone(),
+        last_term_size.clone(),
         sftp_handles.clone(),
+        sftp_manual_nav.clone(),
         tab_statuses.clone(),
         local_snap.clone(),
         local_net_hist.clone(),
@@ -188,7 +192,7 @@ pub fn run() -> Result<()> {
         sessions_model.clone(),
         tabs_model.clone(),
         terminals_model.clone(),
-        handles.clone(),
+        connections.clone(),
         bufs.clone(),
         runtime.clone(),
         last_term_size.clone(),
@@ -368,7 +372,7 @@ pub fn run() -> Result<()> {
         &window,
         tabs_model.clone(),
         terminals_model.clone(),
-        handles.clone(),
+        connections.clone(),
         bufs.clone(),
         sftp_handles.clone(),
         sftp_manual_nav.clone(),
@@ -376,7 +380,7 @@ pub fn run() -> Result<()> {
     wire_sftp_callbacks(&window, sftp_handles.clone(), sftp_manual_nav.clone());
     wire_key_input(
         &window,
-        handles.clone(),
+        connections.clone(),
         bufs.clone(),
         last_term_size.clone(),
     );
@@ -497,8 +501,12 @@ fn wire_app_state_callbacks(
     window: &AppWindow,
     app_state: Rc<RefCell<AppState>>,
     tabs_model: Rc<VecModel<TabInfo>>,
-    handles: Rc<RefCell<HashMap<String, SessionHandle>>>,
+    connections: ConnectionStore,
+    bufs: TermBuffers,
+    runtime: Arc<Runtime>,
+    last_term_size: Arc<Mutex<(u32, u32)>>,
     sftp_handles: SftpHandles,
+    sftp_manual_nav: SftpManualNav,
     tab_statuses: TabStatuses,
     local_snap: LocalSnap,
     local_net_hist: NetHist,
@@ -542,7 +550,7 @@ fn wire_app_state_callbacks(
     {
         let weak = window.as_weak();
         let tabs_model = tabs_model.clone();
-        let handles = handles.clone();
+        let connections = connections.clone();
         let sftp_handles = sftp_handles.clone();
         let tab_statuses = tab_statuses.clone();
         let local_snap = local_snap.clone();
@@ -554,9 +562,7 @@ fn wire_app_state_callbacks(
                 return;
             }
 
-            if let Some(handle) = handles.borrow_mut().remove(&active) {
-                handle.close();
-            }
+            connections.lock().unwrap().disconnect(&active);
             if let Some(sftp) = sftp_handles.lock().unwrap().remove(&active) {
                 sftp.close();
             }
@@ -581,6 +587,16 @@ fn wire_app_state_callbacks(
 
     {
         let weak = window.as_weak();
+        let connections = connections.clone();
+        let bufs = bufs.clone();
+        let runtime = runtime.clone();
+        let last_term_size = last_term_size.clone();
+        let sftp_handles = sftp_handles.clone();
+        let sftp_manual_nav = sftp_manual_nav.clone();
+        let tab_statuses = tab_statuses.clone();
+        let local_snap = local_snap.clone();
+        let local_net_hist = local_net_hist.clone();
+        let tabs_model = tabs_model.clone();
         window.on_reconnect_active_tab(move || {
             let Some(w) = weak.upgrade() else { return };
             let active = w.get_active_tab_id().to_string();
@@ -590,9 +606,82 @@ fn wire_app_state_callbacks(
                 );
                 return;
             }
+
+            let Some(session) = connections.lock().unwrap().session(&active) else {
+                set_terminal_row(&w, &active, |row| {
+                    row.status = t("没有可重连的会话", "No session available to reconnect").into();
+                });
+                return;
+            };
+            if let Some(sftp) = sftp_handles.lock().unwrap().remove(&active) {
+                sftp.close();
+            }
+            sftp_manual_nav
+                .lock()
+                .unwrap()
+                .insert(active.clone(), false);
+            let (initial_cols, initial_rows) = *last_term_size.lock().unwrap();
+            let launch = {
+                let mut manager = connections.lock().unwrap();
+                match manager.reconnect(runtime.handle(), &active, initial_cols, initial_rows) {
+                    Ok(launch) => launch,
+                    Err(err) => {
+                        set_terminal_row(&w, &active, |row| {
+                            row.status =
+                                format!("{}: {err:#}", t("重连失败", "Reconnect failed")).into();
+                        });
+                        return;
+                    }
+                }
+            };
+            for i in 0..tabs_model.row_count() {
+                if let Some(mut row) = tabs_model.row_data(i) {
+                    if row.id.as_str() == active {
+                        row.connected = false;
+                        tabs_model.set_row_data(i, row);
+                        break;
+                    }
+                }
+            }
+            if let Some(st) = tab_statuses.lock().unwrap().get_mut(&active) {
+                st.state = 0;
+            }
             set_terminal_row(&w, &active, |row| {
-                row.status = t("重连将在阶段 3 实现", "Reconnect is planned for phase 3").into();
+                row.status = t("重连中...", "Reconnecting...").into();
+                row.sftp_status = t("SFTP 连接中...", "SFTP connecting...").into();
+                row.sftp_loading = true;
             });
+            refresh_sidebar(&w, &tab_statuses, &local_snap, &local_net_hist);
+
+            let (sftp_tx, sftp_rx) = tokio::sync::mpsc::unbounded_channel::<SessionEvent>();
+            let sftp_handle = spawn_sftp(runtime.handle(), session, sftp_tx);
+            sftp_handles
+                .lock()
+                .unwrap()
+                .insert(active.clone(), sftp_handle);
+            spawn_shell_event_pump(
+                weak.clone(),
+                active.clone(),
+                launch.events,
+                launch.generation,
+                connections.clone(),
+                bufs.clone(),
+                sftp_handles.clone(),
+                sftp_manual_nav.clone(),
+                runtime.clone(),
+                tab_statuses.clone(),
+                local_snap.clone(),
+                local_net_hist.clone(),
+            );
+            spawn_sftp_event_pump(
+                weak.clone(),
+                active,
+                sftp_rx,
+                bufs.clone(),
+                tab_statuses.clone(),
+                local_snap.clone(),
+                local_net_hist.clone(),
+            );
         });
     }
 
@@ -614,6 +703,123 @@ fn wire_app_state_callbacks(
             });
         });
     }
+}
+
+fn spawn_shell_event_pump(
+    weak: slint::Weak<AppWindow>,
+    tab_id: String,
+    events: UnboundedReceiver<SessionEvent>,
+    generation: u64,
+    connections: ConnectionStore,
+    bufs: TermBuffers,
+    sftp_handles: SftpHandles,
+    sftp_manual_nav: SftpManualNav,
+    runtime: Arc<Runtime>,
+    tab_statuses: TabStatuses,
+    local_snap: LocalSnap,
+    local_net_hist: NetHist,
+) {
+    std::thread::spawn(move || {
+        let mut shell_rx = events;
+        let mut cwd_debounce: Option<tokio::task::JoinHandle<()>> = None;
+        loop {
+            match shell_rx.blocking_recv() {
+                None => break,
+                Some(shell_evt) => {
+                    if !connections
+                        .lock()
+                        .unwrap()
+                        .is_current_generation(&tab_id, generation)
+                    {
+                        break;
+                    }
+                    match &shell_evt {
+                        SessionEvent::Connected => connections
+                            .lock()
+                            .unwrap()
+                            .mark_connected(&tab_id, generation),
+                        SessionEvent::Closed(reason) => connections.lock().unwrap().mark_closed(
+                            &tab_id,
+                            generation,
+                            reason.clone(),
+                        ),
+                        _ => {}
+                    }
+
+                    if let SessionEvent::CwdChanged(ref cwd) = shell_evt {
+                        let is_manual = sftp_manual_nav
+                            .lock()
+                            .ok()
+                            .and_then(|m| m.get(&tab_id).copied())
+                            .unwrap_or(false);
+                        if !is_manual {
+                            if let Some(prev) = cwd_debounce.take() {
+                                prev.abort();
+                            }
+                            let cwd = cwd.clone();
+                            let sftp_h = sftp_handles.clone();
+                            let tid = tab_id.clone();
+                            cwd_debounce = Some(runtime.spawn(async move {
+                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                if let Ok(handles) = sftp_h.lock() {
+                                    if let Some(h) = handles.get(&tid) {
+                                        h.list_dir(cwd);
+                                    }
+                                }
+                            }));
+                        }
+                    }
+                    let weak_evt = weak.clone();
+                    let tid = tab_id.clone();
+                    let bufs_evt = bufs.clone();
+                    let st_evt = tab_statuses.clone();
+                    let lc_evt = local_snap.clone();
+                    let nh_evt = local_net_hist.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(win) = weak_evt.upgrade() {
+                            apply_session_event_to_window(
+                                &win, &tid, shell_evt, &bufs_evt, &st_evt, &lc_evt, &nh_evt,
+                            );
+                        }
+                    });
+                }
+            }
+        }
+    });
+}
+
+fn spawn_sftp_event_pump(
+    weak: slint::Weak<AppWindow>,
+    tab_id: String,
+    events: UnboundedReceiver<SessionEvent>,
+    bufs: TermBuffers,
+    tab_statuses: TabStatuses,
+    local_snap: LocalSnap,
+    local_net_hist: NetHist,
+) {
+    std::thread::spawn(move || {
+        let mut sftp_rx = events;
+        loop {
+            match sftp_rx.blocking_recv() {
+                None => break,
+                Some(sftp_evt) => {
+                    let weak_s = weak.clone();
+                    let tid = tab_id.clone();
+                    let bufs_s = bufs.clone();
+                    let st_s = tab_statuses.clone();
+                    let lc_s = local_snap.clone();
+                    let nh_s = local_net_hist.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(win) = weak_s.upgrade() {
+                            apply_session_event_to_window(
+                                &win, &tid, sftp_evt, &bufs_s, &st_s, &lc_s, &nh_s,
+                            );
+                        }
+                    });
+                }
+            }
+        }
+    });
 }
 
 /// The active terminal tab's current SFTP directory ("" if unknown).
@@ -733,7 +939,7 @@ fn wire_session_callbacks(
     sessions_model: Rc<VecModel<SessionInfo>>,
     tabs_model: Rc<VecModel<TabInfo>>,
     terminals_model: Rc<VecModel<TerminalState>>,
-    handles: Rc<RefCell<HashMap<String, SessionHandle>>>,
+    connections: ConnectionStore,
     bufs: TermBuffers,
     runtime: Arc<Runtime>,
     last_term_size: Arc<Mutex<(u32, u32)>>,
@@ -970,7 +1176,7 @@ fn wire_session_callbacks(
         let store = store.clone();
         let tabs_model = tabs_model.clone();
         let terminals_model = terminals_model.clone();
-        let handles = handles.clone();
+        let connections = connections.clone();
         let bufs = bufs.clone();
         let runtime = runtime.clone();
         let last_term_size = last_term_size.clone();
@@ -1057,14 +1263,13 @@ fn wire_session_callbacks(
             // will fire again shortly and send an accurate window_change if
             // needed.
             let (initial_cols, initial_rows) = *last_term_size.lock().unwrap();
-            let (handle, rx) = spawn_session(
+            let launch = connections.lock().unwrap().connect(
                 runtime.handle(),
                 tab_id.clone(),
                 session.clone(),
                 initial_cols,
                 initial_rows,
             );
-            handles.borrow_mut().insert(tab_id.clone(), handle);
 
             // Spawn separate SFTP connection for the same session.
             // The SFTP worker pushes SessionEvent::SftpEntries / SftpStatus
@@ -1089,106 +1294,30 @@ fn wire_session_callbacks(
                 sftp_rx
             };
 
-            // --- Shell event pump (dedicated thread) ----------------------
-            // Blocks on shell events; handles CwdChanged with 500 ms debounce.
-            {
-                let weak_inner = weak.clone();
-                let bufs_thread = bufs.clone();
-                let sftp_handles_pump = sftp_handles.clone();
-                let sftp_manual_nav_pump = sftp_manual_nav.clone();
-                let rt_pump = runtime.clone();
-                let tab_id_pump = tab_id.clone();
-                let statuses_pump = tab_statuses.clone();
-                let local_pump = local_snap.clone();
-                let net_pump = local_net_hist.clone();
-                std::thread::spawn(move || {
-                    let mut shell_rx = rx;
-                    let mut cwd_debounce: Option<tokio::task::JoinHandle<()>> = None;
-                    loop {
-                        match shell_rx.blocking_recv() {
-                            None => break,
-                            Some(shell_evt) => {
-                                if let SessionEvent::CwdChanged(ref cwd) = shell_evt {
-                                    let is_manual = sftp_manual_nav_pump
-                                        .lock()
-                                        .ok()
-                                        .and_then(|m| m.get(&tab_id_pump).copied())
-                                        .unwrap_or(false);
-                                    if !is_manual {
-                                        if let Some(prev) = cwd_debounce.take() {
-                                            prev.abort();
-                                        }
-                                        let cwd = cwd.clone();
-                                        let sftp_h = sftp_handles_pump.clone();
-                                        let tid = tab_id_pump.clone();
-                                        cwd_debounce = Some(rt_pump.spawn(async move {
-                                            tokio::time::sleep(std::time::Duration::from_millis(
-                                                500,
-                                            ))
-                                            .await;
-                                            if let Ok(handles) = sftp_h.lock() {
-                                                if let Some(h) = handles.get(&tid) {
-                                                    h.list_dir(cwd);
-                                                }
-                                            }
-                                        }));
-                                    }
-                                }
-                                let weak_evt = weak_inner.clone();
-                                let tid = tab_id_pump.clone();
-                                let bufs_evt = bufs_thread.clone();
-                                let st_evt = statuses_pump.clone();
-                                let lc_evt = local_pump.clone();
-                                let nh_evt = net_pump.clone();
-                                let _ = slint::invoke_from_event_loop(move || {
-                                    if let Some(win) = weak_evt.upgrade() {
-                                        apply_session_event_to_window(
-                                            &win, &tid, shell_evt, &bufs_evt, &st_evt, &lc_evt,
-                                            &nh_evt,
-                                        );
-                                    }
-                                });
-                            }
-                        }
-                    }
-                });
-            }
+            spawn_shell_event_pump(
+                weak.clone(),
+                tab_id.clone(),
+                launch.events,
+                launch.generation,
+                connections.clone(),
+                bufs.clone(),
+                sftp_handles.clone(),
+                sftp_manual_nav.clone(),
+                runtime.clone(),
+                tab_statuses.clone(),
+                local_snap.clone(),
+                local_net_hist.clone(),
+            );
 
-            // --- SFTP event pump (separate thread) -------------------------
-            // Never blocks on shell; dispatches SFTP events the moment they
-            // arrive so tree/file-list updates are immediate even when the
-            // terminal is idle.
-            {
-                let weak_sftp = weak.clone();
-                let bufs_sftp = bufs.clone();
-                let tab_id_sftp = tab_id.clone();
-                let statuses_sftp = tab_statuses.clone();
-                let local_sftp = local_snap.clone();
-                let net_sftp = local_net_hist.clone();
-                std::thread::spawn(move || {
-                    let mut sftp_rx = sftp_evt_tx;
-                    loop {
-                        match sftp_rx.blocking_recv() {
-                            None => break,
-                            Some(sftp_evt) => {
-                                let weak_s = weak_sftp.clone();
-                                let tid = tab_id_sftp.clone();
-                                let bufs_s = bufs_sftp.clone();
-                                let st_s = statuses_sftp.clone();
-                                let lc_s = local_sftp.clone();
-                                let nh_s = net_sftp.clone();
-                                let _ = slint::invoke_from_event_loop(move || {
-                                    if let Some(win) = weak_s.upgrade() {
-                                        apply_session_event_to_window(
-                                            &win, &tid, sftp_evt, &bufs_s, &st_s, &lc_s, &nh_s,
-                                        );
-                                    }
-                                });
-                            }
-                        }
-                    }
-                });
-            }
+            spawn_sftp_event_pump(
+                weak.clone(),
+                tab_id.clone(),
+                sftp_evt_tx,
+                bufs.clone(),
+                tab_statuses.clone(),
+                local_snap.clone(),
+                local_net_hist.clone(),
+            );
         });
     }
 }
@@ -1753,7 +1882,7 @@ fn wire_tab_callbacks(
     window: &AppWindow,
     tabs_model: Rc<VecModel<TabInfo>>,
     terminals_model: Rc<VecModel<TerminalState>>,
-    handles: Rc<RefCell<HashMap<String, SessionHandle>>>,
+    connections: ConnectionStore,
     bufs: TermBuffers,
     sftp_handles: SftpHandles,
     sftp_manual_nav: SftpManualNav,
@@ -1770,7 +1899,7 @@ fn wire_tab_callbacks(
         let weak = window.as_weak();
         let tabs_model = tabs_model.clone();
         let terminals_model = terminals_model.clone();
-        let handles = handles.clone();
+        let connections = connections.clone();
         let bufs = bufs.clone();
         let sftp_handles = sftp_handles.clone();
         let sftp_manual_nav = sftp_manual_nav.clone();
@@ -1779,9 +1908,7 @@ fn wire_tab_callbacks(
             if id == "welcome" {
                 return;
             }
-            if let Some(handle) = handles.borrow_mut().remove(&id) {
-                handle.close();
-            }
+            connections.lock().unwrap().remove(&id);
             if let Some(sftp) = sftp_handles.lock().unwrap().remove(&id) {
                 sftp.close();
             }
@@ -2009,14 +2136,14 @@ fn wire_sftp_callbacks(
 
 fn wire_key_input(
     window: &AppWindow,
-    handles: Rc<RefCell<HashMap<String, SessionHandle>>>,
+    connections: ConnectionStore,
     bufs: TermBuffers,
     last_term_size: Arc<Mutex<(u32, u32)>>,
 ) {
     // Forward each keystroke as raw bytes to the SSH PTY. The server's bash /
     // readline handles echo, history (↑↓), Tab completion, Ctrl+C, etc.
     {
-        let handles = handles.clone();
+        let connections = connections.clone();
         let bufs = bufs.clone();
         // Shared timestamp: the last time the Shift key alone was pressed
         // (key="", shift=true).  Used by the time-based Backspace filter below.
@@ -2218,14 +2345,16 @@ fn wire_key_input(
             // Log only the length — never the keystroke bytes, which can be
             // password characters (#15).
             tracing::debug!(
-                "send_key len={} handle_exists={}",
+                "send_key len={} connection_known={}",
                 bytes.len(),
-                handles.borrow().contains_key(tab_id.as_str()),
+                connections
+                    .lock()
+                    .unwrap()
+                    .session(tab_id.as_str())
+                    .is_some(),
             );
             if !bytes.is_empty() {
-                if let Some(handle) = handles.borrow().get(tab_id.as_str()) {
-                    handle.send_raw(bytes);
-                }
+                connections.lock().unwrap().send_raw(tab_id.as_str(), bytes);
             }
         });
     }
@@ -2243,7 +2372,7 @@ fn wire_key_input(
     //
     // Consolas 13 px renders at ≈ 8 px wide × 16 px tall per cell.
     {
-        let handles = handles.clone();
+        let connections = connections.clone();
         let bufs_resize = bufs.clone(); // keep bufs alive for the copy handler below
                                         // The Slint side now measures the real Consolas cell size (via a hidden
                                         // probe Text) and passes whole column/row counts directly, so there is
@@ -2256,9 +2385,10 @@ fn wire_key_input(
             // Keep the shared size up-to-date so future connections start
             // with the correct PTY dimensions.
             *last_term_size.lock().unwrap() = (cols, rows);
-            if let Some(handle) = handles.borrow().get(tab_id.as_str()) {
-                handle.resize(cols, rows);
-            }
+            connections
+                .lock()
+                .unwrap()
+                .resize(tab_id.as_str(), cols, rows);
             if let Some(buf) = bufs_resize.lock().unwrap().get_mut(tab_id.as_str()) {
                 let (old_rows, old_cols) = buf.parser.screen().size();
                 let new_rows = rows as u16;
@@ -2328,21 +2458,17 @@ fn wire_key_input(
 
     // Middle-click / Ctrl+Shift+V: paste clipboard text into PTY.
     {
-        let handles = handles.clone();
+        let connections = connections.clone();
         window.on_paste_from_clipboard(move |tab_id: SharedString| {
-            // Clone the (Send) command sender for this tab so the clipboard read
-            // can run off the UI thread.  Reading arboard on the event-loop
-            // thread is what froze the app on middle-click / paste — see the
-            // copy handler above for the deadlock explanation.
-            let sender = handles
-                .borrow()
-                .get(tab_id.as_str())
-                .map(|h| h.commands.clone());
-            let Some(sender) = sender else { return };
+            let connections = connections.clone();
+            let tid = tab_id.to_string();
             std::thread::spawn(move || {
                 match arboard::Clipboard::new().and_then(|mut cb| cb.get_text()) {
                     Ok(text) => {
-                        let _ = sender.send(SessionCommand::RawInput(text.into_bytes()));
+                        connections
+                            .lock()
+                            .unwrap()
+                            .send_raw(&tid, text.into_bytes());
                     }
                     Err(e) => tracing::warn!("paste_from_clipboard: clipboard error: {}", e),
                 }
@@ -2354,7 +2480,7 @@ fn wire_key_input(
     // wipe the displayed screen, then nudge the remote to redraw a fresh prompt.
     {
         let bufs_clear = bufs.clone();
-        let handles_clear = handles.clone();
+        let connections_clear = connections.clone();
         let weak = window.as_weak();
         window.on_clear_terminal(move |tab_id: SharedString| {
             let tid = tab_id.to_string();
@@ -2378,9 +2504,7 @@ fn wire_key_input(
                     row.rows_used = 0;
                 });
             }
-            if let Some(h) = handles_clear.borrow().get(&tid) {
-                h.send_raw(vec![0x0c]); // Ctrl+L → shell clears + redraws prompt
-            }
+            connections_clear.lock().unwrap().send_raw(&tid, vec![0x0c]); // Ctrl+L → shell clears + redraws prompt
         });
     }
 
