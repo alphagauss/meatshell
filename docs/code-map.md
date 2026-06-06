@@ -65,6 +65,7 @@
 - `rebuild_tab_display(...)`
 - `sync_sessions_to_model(...)`
 - `set_terminal_row(...)`
+- `sgr_mouse_sequence(...)`
 - `key_to_pty_bytes(...)`
 - `handle_file_drop(...)`
 - `active_sftp_path(...)`
@@ -94,6 +95,7 @@
 
 `LegacyTerminalEngine` 里最重要的内部逻辑：
 - `new(...)`
+- `mouse_reporting(...)`
 - `ingest(...)`
 - `rewrite_hvp(...)`
 - `ingest_chunk(...)`
@@ -129,7 +131,8 @@
 ### `src/terminal_types.rs`
 职责：
 - 保存终端渲染数据类型，避免把纯渲染模型继续定义在 `src/app.rs`
-- `BuiltScreen` 是泛型快照，`RenderSpan` 是 Rust 侧中立渲染 run，`app.rs` 再转换成 Slint 的 `TermSpan`
+- `BuiltScreen` 是泛型快照，除渲染 run 和 cursor 外也携带当前是否启用 SGR mouse reporting
+- `RenderSpan` 是 Rust 侧中立渲染 run，`app.rs` 再转换成 Slint 的 `TermSpan`
 
 关键符号：
 - `BuiltScreen`
@@ -152,7 +155,7 @@
 - 包装 `alacritty_terminal`，实现实验终端引擎
 - 接收 SSH 输出 bytes，交给 alacritty parser 更新终端状态
 - 把 alacritty grid/cell 转换为 `BuiltScreen<RenderSpan>`，不把 alacritty 内部类型泄漏到 `app.rs` 或 Slint
-- 支持基础 resize；鼠标/TUI 交互增强留到阶段 6
+- 支持基础 resize，并从 alacritty `TermMode` 暴露 SGR mouse reporting 状态给 UI
 
 关键符号：
 - `AlacrittyTerminalEngine`
@@ -344,6 +347,7 @@
 - `disconnect-active-tab`
 - `reconnect-active-tab`
 - `open-transfer-window`
+- `terminal-mouse`
 - `dialog-proxy`
 - 导出类型：`SessionInfo`、`SessionDraft`、`TabInfo`、`SftpEntry`、`SftpTreeNode`
 
@@ -357,6 +361,7 @@
 - 终端格子渲染
 - 隐藏 IME 输入
 - 搜索高亮、拖拽选区、右键菜单、滚轮滚动
+- 当终端引擎报告 SGR mouse mode 已开启时，把左键按下/释放和滚轮转发给 Rust，避免普通文本选择退化
 - 底部 `BottomPanel` 承载
 - 根据 `bottom-panel-visible` / `bottom-panel-tab` 决定当前底部文件面板是否显示
 
@@ -365,6 +370,7 @@
 - `TermMatch`
 - `MenuItem`
 - `TerminalView`
+- `terminal-mouse`
 
 定位提示：
 - 终端交互问题，先看这里，再看 `src/app.rs` 的键盘和渲染代码

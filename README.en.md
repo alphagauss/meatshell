@@ -75,6 +75,7 @@ xattr -dr com.apple.quarantine meatshell     # clear the "unsigned app" Gatekeep
 - [x] SFTP file browser + drag-and-drop upload/download
 - [x] Top toolbar shell: sidebar, bottom panel, disconnect, reconnect, transfer entry
 - [x] Bottom Files / Tunnels tab shell (Files continues to use the SFTP panel)
+- [x] Basic SGR mouse reporting for the experimental alacritty engine (left click, release, wheel)
 - [ ] Known-hosts (`known_hosts`) verification
 - [ ] Store session passwords in the OS keychain
 

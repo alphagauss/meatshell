@@ -49,6 +49,11 @@ impl AlacrittyTerminalEngine {
     pub fn displayed_text(&self) -> &[String] {
         &self.displayed_text
     }
+
+    pub fn mouse_reporting(&self) -> bool {
+        let mode = self.term.mode();
+        mode.intersects(TermMode::MOUSE_MODE) && mode.contains(TermMode::SGR_MOUSE)
+    }
 }
 
 impl TerminalEngine for AlacrittyTerminalEngine {
@@ -119,6 +124,7 @@ impl TerminalEngine for AlacrittyTerminalEngine {
                 last_content + 1
             },
             is_alt: self.term.mode().contains(TermMode::ALT_SCREEN),
+            mouse_reporting: self.mouse_reporting(),
         }
     }
 

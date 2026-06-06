@@ -42,6 +42,7 @@ export struct TerminalState {
     cursor-col: int,
     rows-used: int,        // content rows, for viewport sizing
     is-alt-screen: bool,
+    mouse-reporting: bool, // app enabled SGR mouse reporting
     find-matches: [TermMatch], // search-highlight rectangles
     selection: [TermMatch],    // drag-selection highlight rectangles
 
@@ -154,6 +155,7 @@ export component AppWindow inherits Window {
     callback send-key(string /* tab-id */, string /* key */, bool /* ctrl */, bool /* alt */, bool /* shift */);
     // Notifies Rust of a PTY resize (pixel dimensions; Rust converts to cols/rows).
     callback terminal-resize(string /* tab-id */, float /* width-px */, float /* height-px */);
+    callback terminal-mouse(string /* tab-id */, int /* button */, bool /* pressed */, int /* row */, int /* col */);
 
     // --- SFTP callbacks ---------------------------------------------------
     // Navigate to a new remote directory (or ".." to go up).
@@ -272,6 +274,7 @@ export component AppWindow inherits Window {
                     cursor-col: term.cursor-col;
                     rows-used: term.rows-used;
                     is-alt-screen: term.is-alt-screen;
+                    mouse-reporting: term.mouse-reporting;
                     find-matches: term.find-matches;
                     selection: term.selection;
                     bottom-panel-visible: root.bottom-panel-visible;
@@ -284,6 +287,7 @@ export component AppWindow inherits Window {
                     sftp-tree-nodes: term.sftp-tree-nodes;
                     send-key(key, ctrl, alt, shift) => { root.send-key(term.id, key, ctrl, alt, shift) }
                     terminal-resize(w, h) => { root.terminal-resize(term.id, w, h) }
+                    terminal-mouse(button, pressed, row, col) => { root.terminal-mouse(term.id, button, pressed, row, col) }
                     sftp-navigate(path) => { root.sftp-navigate(term.id, path); }
                     select-bottom-panel-tab(tab) => { root.select-bottom-panel-tab(tab); }
                     sftp-download(path) => { root.sftp-download(term.id, path); }

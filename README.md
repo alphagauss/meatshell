@@ -71,6 +71,7 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 - [x] SFTP 文件浏览 + 拖拽上传/下载
 - [x] 顶部工具栏骨架：侧边栏、底部面板、断开、重连、文件传输入口
 - [x] 底部“文件 / 隧道”页签骨架（文件页继续使用 SFTP 面板）
+- [x] alacritty 实验引擎的基础 SGR 鼠标上报（左键、释放、滚轮）
 - [ ] 已知主机 (known_hosts) 校验
 - [ ] 会话密码使用 OS 钥匙串存储
 

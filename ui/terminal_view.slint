@@ -78,6 +78,7 @@ export component TerminalView inherits Rectangle {
     in property <int> cursor-col;
     in property <int> rows-used;        // content rows, for viewport sizing
     in property <bool>   is-alt-screen;
+    in property <bool>   mouse-reporting;
     in property <[TermMatch]> find-matches; // search-highlight rectangles
     in property <[TermMatch]> selection;    // drag-selection highlight rectangles
 
@@ -93,6 +94,7 @@ export component TerminalView inherits Rectangle {
 
     callback send-key(string, bool, bool, bool);
     callback terminal-resize(float, float);
+    callback terminal-mouse(int, bool, int, int);
     callback sftp-navigate(string);
     callback select-bottom-panel-tab(string);
     callback sftp-download(string);
@@ -311,15 +313,25 @@ export component TerminalView inherits Rectangle {
                                         root.ctx-y = self.mouse-y;
                                         ctx-menu.show();
                                     } else if (ev.button == PointerEventButton.left) {
-                                        root.selecting = true;
-                                        root.select-start(
-                                            floor(self.mouse-y / root.cell-h),
-                                            floor(self.mouse-x / root.cell-w));
+                                        if (root.mouse-reporting) {
+                                            root.terminal-mouse(0, true,
+                                                floor(self.mouse-y / root.cell-h),
+                                                floor(self.mouse-x / root.cell-w));
+                                        } else {
+                                            root.selecting = true;
+                                            root.select-start(
+                                                floor(self.mouse-y / root.cell-h),
+                                                floor(self.mouse-x / root.cell-w));
+                                        }
                                     }
                                 } else if (ev.kind == PointerEventKind.up) {
                                     if (ev.button == PointerEventButton.middle) {
                                         root.paste-from-clipboard();
                                         ime-input.focus();
+                                    } else if (ev.button == PointerEventButton.left && root.mouse-reporting) {
+                                        root.terminal-mouse(0, false,
+                                            floor(self.mouse-y / root.cell-h),
+                                            floor(self.mouse-x / root.cell-w));
                                     } else if (ev.button == PointerEventButton.left
                                             && root.selecting) {
                                         root.selecting = false;
@@ -356,7 +368,11 @@ export component TerminalView inherits Rectangle {
                                 // In alt-screen mode (vim/nano/btop) the program
                                 // handles scroll itself — suppress our history scroll
                                 // so the full-screen UI isn't pushed out of view.
-                                if (!root.is-alt-screen) {
+                                if (root.mouse-reporting) {
+                                    root.terminal-mouse(ev.delta-y > 0 ? 64 : 65, true,
+                                        floor(self.mouse-y / root.cell-h),
+                                        floor(self.mouse-x / root.cell-w));
+                                } else if (!root.is-alt-screen) {
                                     root.terminal-scroll(ev.delta-y > 0 ? 3 : -3);
                                 }
                                 accept

@@ -1230,6 +1230,7 @@ fn wire_session_callbacks(
                 cursor_col: 0,
                 rows_used: 0,
                 is_alt_screen: false,
+                mouse_reporting: false,
                 find_matches: ModelRc::from(std::rc::Rc::new(VecModel::<TermMatch>::default())),
                 selection: ModelRc::from(std::rc::Rc::new(VecModel::<TermMatch>::default())),
                 sftp_path: "/".into(),
@@ -1468,6 +1469,23 @@ fn extract_selection(rows: &[String], sr: u16, sc: u16, er: u16, ec: u16) -> Str
     out
 }
 
+fn sgr_mouse_sequence(
+    button: i32,
+    pressed: bool,
+    row: i32,
+    col: i32,
+    rows: u16,
+    cols: u16,
+) -> Vec<u8> {
+    let max_row = rows.saturating_sub(1) as i32;
+    let max_col = cols.saturating_sub(1) as i32;
+    let row = row.clamp(0, max_row) + 1;
+    let col = col.clamp(0, max_col) + 1;
+    let button = button.max(0);
+    let final_byte = if pressed { 'M' } else { 'm' };
+    format!("\x1b[<{button};{col};{row}{final_byte}").into_bytes()
+}
+
 fn term_spans_model(spans: Vec<RenderSpan>) -> ModelRc<TermSpan> {
     let rows: Vec<TermSpan> = spans
         .into_iter()
@@ -1506,13 +1524,20 @@ fn rebuild_tab_display(win: &AppWindow, bufs: &TermBuffers, tab_id: &str) {
     let spans = term_spans_model(b.spans);
     let fm = ModelRc::from(Rc::new(VecModel::from(matches)));
     let sm = ModelRc::from(Rc::new(VecModel::from(sel)));
-    let (cr, cc, ru, alt) = (b.cursor_row, b.cursor_col, b.rows_used, b.is_alt);
+    let (cr, cc, ru, alt, mouse) = (
+        b.cursor_row,
+        b.cursor_col,
+        b.rows_used,
+        b.is_alt,
+        b.mouse_reporting,
+    );
     set_terminal_row(win, tab_id, move |row| {
         row.spans = spans.clone();
         row.cursor_row = cr;
         row.cursor_col = cc;
         row.rows_used = ru;
         row.is_alt_screen = alt;
+        row.mouse_reporting = mouse;
         row.find_matches = fm.clone();
         row.selection = sm.clone();
     });
@@ -1718,14 +1743,20 @@ fn apply_session_event_to_window(
                     ModelRc::from(std::rc::Rc::new(VecModel::from(matches)));
                 let sel_model: ModelRc<TermMatch> =
                     ModelRc::from(std::rc::Rc::new(VecModel::from(sel)));
-                let (cur_row, cur_col, rows_used, is_alt) =
-                    (b.cursor_row, b.cursor_col, b.rows_used, b.is_alt);
+                let (cur_row, cur_col, rows_used, is_alt, mouse_reporting) = (
+                    b.cursor_row,
+                    b.cursor_col,
+                    b.rows_used,
+                    b.is_alt,
+                    b.mouse_reporting,
+                );
                 update_terminal(&|t| {
                     t.spans = spans_model.clone();
                     t.cursor_row = cur_row;
                     t.cursor_col = cur_col;
                     t.rows_used = rows_used;
                     t.is_alt_screen = is_alt;
+                    t.mouse_reporting = mouse_reporting;
                     t.find_matches = matches_model.clone();
                     t.selection = sel_model.clone();
                 });
@@ -2438,6 +2469,28 @@ fn wire_key_input(
         });
     }
 
+    // Terminal mouse reporting: only active when the terminal engine has seen
+    // an app enable SGR mouse mode. Plain terminal text selection stays local.
+    {
+        let connections = connections.clone();
+        let bufs_mouse = bufs.clone();
+        window.on_terminal_mouse(
+            move |tab_id: SharedString, button: i32, pressed: bool, row: i32, col: i32| {
+                let tid = tab_id.to_string();
+                let seq = {
+                    let map = bufs_mouse.lock().unwrap();
+                    let Some(buf) = map.get(&tid) else { return };
+                    if !buf.mouse_reporting() {
+                        return;
+                    }
+                    let (rows, cols) = buf.parser.screen().size();
+                    sgr_mouse_sequence(button, pressed, row, col, rows, cols)
+                };
+                connections.lock().unwrap().send_raw(&tid, seq);
+            },
+        );
+    }
+
     // Ctrl+Shift+C: copy current terminal screen to clipboard.
     {
         let bufs = bufs.clone();
@@ -2521,6 +2574,7 @@ fn wire_key_input(
                     row.cursor_row = 0;
                     row.cursor_col = 0;
                     row.rows_used = 0;
+                    row.mouse_reporting = false;
                 });
             }
             connections_clear.lock().unwrap().send_raw(&tid, vec![0x0c]); // Ctrl+L → shell clears + redraws prompt
@@ -2988,6 +3042,13 @@ impl LegacyTerminalEngine {
         }
     }
 
+    fn mouse_reporting(&self) -> bool {
+        self.alacritty
+            .as_ref()
+            .map(|engine| engine.mouse_reporting())
+            .unwrap_or(false)
+    }
+
     /// Feed bytes to vt100 and capture scrolled-off lines into history.
     ///
     /// We detect scroll by diffing the screen before/after a `process`, which
@@ -3161,6 +3222,7 @@ impl LegacyTerminalEngine {
                 cursor_col: cur_col as i32,
                 rows_used,
                 is_alt,
+                mouse_reporting: false,
             };
         }
 
@@ -3211,6 +3273,7 @@ impl LegacyTerminalEngine {
             cursor_col: 0,
             rows_used: win as i32,
             is_alt: false,
+            mouse_reporting: false,
         }
     }
 }

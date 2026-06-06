@@ -5,6 +5,7 @@ pub struct BuiltScreen<Span> {
     pub cursor_col: i32,
     pub rows_used: i32,
     pub is_alt: bool,
+    pub mouse_reporting: bool,
 }
 
 /// One coloured run positioned on the terminal grid.
