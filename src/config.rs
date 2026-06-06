@@ -44,7 +44,11 @@ impl Drop for Secret {
 impl std::fmt::Debug for Secret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Never reveal the contents in logs / debug output.
-        f.write_str(if self.0.is_empty() { "Secret(\"\")" } else { "Secret(***)" })
+        f.write_str(if self.0.is_empty() {
+            "Secret(\"\")"
+        } else {
+            "Secret(***)"
+        })
     }
 }
 
@@ -147,9 +151,8 @@ impl ConfigStore {
     pub fn load() -> Result<Self> {
         let path = Self::config_path()?;
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create config dir {}", parent.display())
-            })?;
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create config dir {}", parent.display()))?;
         }
 
         let cache = if path.exists() {
@@ -190,12 +193,7 @@ impl ConfigStore {
     }
 
     pub fn upsert(&mut self, session: Session) {
-        if let Some(existing) = self
-            .cache
-            .sessions
-            .iter_mut()
-            .find(|s| s.id == session.id)
-        {
+        if let Some(existing) = self.cache.sessions.iter_mut().find(|s| s.id == session.id) {
             *existing = session;
         } else {
             self.cache.sessions.push(session);
@@ -236,8 +234,7 @@ impl ConfigStore {
         // Write to a sibling temp file then rename — cheap atomicity on most
         // platforms. Good enough for a config file.
         let tmp = self.path.with_extension("json.tmp");
-        fs::write(&tmp, raw)
-            .with_context(|| format!("failed to write {}", tmp.display()))?;
+        fs::write(&tmp, raw).with_context(|| format!("failed to write {}", tmp.display()))?;
         fs::rename(&tmp, &self.path)
             .with_context(|| format!("failed to finalise {}", self.path.display()))?;
         Ok(())

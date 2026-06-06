@@ -283,7 +283,9 @@ async fn run_session(
     let _ = events.send(SessionEvent::Status(format!(
         "{} {}@{}:{} ...",
         t("连接中", "Connecting"),
-        session.user, session.host, session.port
+        session.user,
+        session.host,
+        session.port
     )));
 
     let config = Arc::new(client::Config {
@@ -350,7 +352,9 @@ async fn run_session(
     };
 
     if !authed {
-        let _ = events.send(SessionEvent::Closed(t("认证失败", "authentication failed").into()));
+        let _ = events.send(SessionEvent::Closed(
+            t("认证失败", "authentication failed").into(),
+        ));
         let _ = handle
             .disconnect(Disconnect::ByApplication, "auth failed", "")
             .await;
@@ -381,7 +385,8 @@ async fn run_session(
     let _ = events.send(SessionEvent::Status(format!(
         "{} {}@{}",
         t("已连接", "Connected"),
-        session.user, session.host
+        session.user,
+        session.host
     )));
 
     // Whether we have already injected the PROMPT_COMMAND setup.
@@ -518,7 +523,9 @@ async fn run_session(
     let _ = handle
         .disconnect(Disconnect::ByApplication, "bye", "")
         .await;
-    let _ = events.send(SessionEvent::Closed(t("连接已关闭", "connection closed").into()));
+    let _ = events.send(SessionEvent::Closed(
+        t("连接已关闭", "connection closed").into(),
+    ));
     Ok(())
 }
 
