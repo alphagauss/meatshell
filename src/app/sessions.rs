@@ -8,7 +8,7 @@ use crate::config::{AuthMethod, ConfigStore, Secret, Session};
 use crate::i18n::t;
 use crate::sftp::spawn_sftp;
 use crate::ssh::SessionEvent;
-use crate::terminal::engine::TerminalEngineMode;
+use crate::terminal::engine::TerminalEngine;
 
 use super::events::{spawn_sftp_event_pump, spawn_shell_event_pump};
 use super::types::{
@@ -51,7 +51,6 @@ pub(super) fn wire_session_callbacks(
     bufs: TermBuffers,
     runtime: Arc<tokio::runtime::Runtime>,
     last_term_size: Arc<Mutex<(u32, u32)>>,
-    terminal_engine_mode: TerminalEngineMode,
     sftp_handles: SftpHandles,
     sftp_manual_nav: SftpManualNav,
     tab_statuses: TabStatuses,
@@ -291,6 +290,7 @@ pub(super) fn wire_session_callbacks(
                 Some(s) => s,
                 None => return,
             };
+            let terminal_engine_mode = store.borrow().terminal_engine_mode();
             let tab_id = format!("term-{}", uuid::Uuid::new_v4());
             let tab_title = session.name.clone();
 
@@ -328,10 +328,13 @@ pub(super) fn wire_session_callbacks(
                     VecModel::<SftpTreeNode>::default(),
                 )),
             });
-            bufs.lock().unwrap().insert(
-                tab_id.clone(),
-                TermBuffer::new(24, 80, 5000, terminal_engine_mode),
+            let buf = TermBuffer::new(24, 80, 5000, terminal_engine_mode);
+            tracing::info!(
+                "new terminal tab {} using {} engine",
+                tab_id,
+                TerminalEngine::mode(&buf).as_str()
             );
+            bufs.lock().unwrap().insert(tab_id.clone(), buf);
             sftp_manual_nav
                 .lock()
                 .unwrap()

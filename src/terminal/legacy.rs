@@ -1,3 +1,5 @@
+use std::cell::{Ref, RefCell};
+
 use super::alacritty::AlacrittyTerminalEngine;
 use super::engine::{TerminalEngine, TerminalEngineMode};
 use super::types::{BuiltScreen, HistSpan, Line, RenderSpan};
@@ -23,7 +25,7 @@ pub struct LegacyTerminalEngine {
     /// Scrollback view offset in lines (0 = live bottom).
     pub view_offset: usize,
     /// Plain text of the rows currently displayed (drives find + selection).
-    pub displayed_text: Vec<String>,
+    pub displayed_text: RefCell<Vec<String>>,
     /// CSI-scanner state for rewriting HVP (`ESC [ … f`) into CUP (`ESC [ … H`).
     /// vt100 0.15 only implements the `H` final byte, not the equivalent `f`
     /// that btop/htop use for cursor positioning — without this rewrite their
@@ -95,24 +97,26 @@ impl LegacyTerminalEngine {
             parser: vt100::Parser::new(rows, cols, scrollback),
             alacritty: match mode {
                 TerminalEngineMode::Legacy => None,
-                TerminalEngineMode::AlacrittyExperimental => {
-                    Some(AlacrittyTerminalEngine::new(rows, cols))
-                }
+                TerminalEngineMode::Alacritty => Some(AlacrittyTerminalEngine::new(rows, cols)),
             },
             find_query: String::new(),
             sel: None,
             history: Vec::new(),
             prev: Vec::new(),
             view_offset: 0,
-            displayed_text: Vec::new(),
+            displayed_text: RefCell::new(Vec::new()),
             csi_state: CsiState::Normal,
         }
+    }
+
+    pub fn displayed_text(&self) -> Ref<'_, Vec<String>> {
+        self.displayed_text.borrow()
     }
 
     pub fn mouse_reporting(&self) -> bool {
         self.alacritty
             .as_ref()
-            .map(|engine| engine.mouse_reporting())
+            .map(TerminalEngine::mouse_reporting)
             .unwrap_or(false)
     }
 
@@ -245,7 +249,7 @@ impl LegacyTerminalEngine {
 
     /// Render the terminal grid for the current scrollback `view_offset`
     /// (0 = live).  Caches the displayed plain text for find/selection.
-    fn render(&mut self) -> BuiltScreen<RenderSpan> {
+    fn render(&self) -> BuiltScreen<RenderSpan> {
         let (is_alt, rows, cols, cur_row, cur_col) = {
             let s = self.parser.screen();
             let (r, c) = s.size();
@@ -277,7 +281,7 @@ impl LegacyTerminalEngine {
                 }
                 displayed.push(plain.trim_end().to_string());
             }
-            self.displayed_text = displayed;
+            self.displayed_text.replace(displayed);
             let rows_used = if is_alt {
                 rows as i32
             } else {
@@ -333,7 +337,7 @@ impl LegacyTerminalEngine {
         while displayed.len() < win {
             displayed.push(String::new());
         }
-        self.displayed_text = displayed;
+        self.displayed_text.replace(displayed);
         BuiltScreen {
             spans,
             cursor_row: -1, // hide the live cursor while viewing history
@@ -346,7 +350,12 @@ impl LegacyTerminalEngine {
 }
 
 impl TerminalEngine for LegacyTerminalEngine {
-    type Screen = BuiltScreen<RenderSpan>;
+    fn mode(&self) -> TerminalEngineMode {
+        self.alacritty
+            .as_ref()
+            .map(|engine| engine.mode())
+            .unwrap_or(TerminalEngineMode::Legacy)
+    }
 
     fn ingest(&mut self, bytes: &[u8]) {
         if let Some(engine) = self.alacritty.as_mut() {
@@ -356,21 +365,40 @@ impl TerminalEngine for LegacyTerminalEngine {
         }
     }
 
-    fn render(&mut self) -> Self::Screen {
-        if let Some(engine) = self.alacritty.as_mut() {
+    fn render(&self) -> BuiltScreen<RenderSpan> {
+        if let Some(engine) = self.alacritty.as_ref() {
             let screen = TerminalEngine::render(engine);
-            self.displayed_text = engine.displayed_text().to_vec();
+            self.displayed_text
+                .replace(engine.displayed_text().to_vec());
             screen
         } else {
             LegacyTerminalEngine::render(self)
         }
     }
 
-    fn resize(&mut self, rows: u16, cols: u16) {
-        self.parser.set_size(rows, cols);
+    fn resize(&mut self, rows: usize, cols: usize) {
+        self.parser.set_size(rows as u16, cols as u16);
         if let Some(engine) = self.alacritty.as_mut() {
             TerminalEngine::resize(engine, rows, cols);
         }
+    }
+
+    fn mouse_reporting(&self) -> bool {
+        LegacyTerminalEngine::mouse_reporting(self)
+    }
+
+    fn application_cursor(&self) -> bool {
+        self.alacritty
+            .as_ref()
+            .map(TerminalEngine::application_cursor)
+            .unwrap_or(false)
+    }
+
+    fn bracketed_paste(&self) -> bool {
+        self.alacritty
+            .as_ref()
+            .map(TerminalEngine::bracketed_paste)
+            .unwrap_or(false)
     }
 }
 

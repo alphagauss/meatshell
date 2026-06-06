@@ -69,8 +69,10 @@ pub fn run() -> Result<()> {
     let tunnels: TunnelStore = Arc::new(Mutex::new(
         TunnelManager::load(tunnel_tx).context("failed to load tunnel config")?,
     ));
-    let terminal_engine_mode = TerminalEngineMode::from_env();
-    tracing::info!("terminal engine mode: {}", terminal_engine_mode.as_str());
+    tracing::info!(
+        "terminal engine mode: {}",
+        store.borrow().terminal_engine_mode().as_str()
+    );
 
     // Per-tab SFTP handles — Arc<Mutex> so the event-pump OS thread and the
     // Slint UI thread can both post SftpCommands.
@@ -102,6 +104,7 @@ pub fn run() -> Result<()> {
     crate::i18n::set_language(store.borrow().language());
     crate::i18n::apply_to_slint();
     window.set_lang_en(crate::i18n::is_en());
+    window.set_terminal_engine_mode(store.borrow().terminal_engine_mode().as_str().into());
 
     let app_state = Rc::new(RefCell::new(AppState::default()));
     sync_app_state_to_window(&window, &app_state.borrow());
@@ -145,7 +148,6 @@ pub fn run() -> Result<()> {
         bufs.clone(),
         runtime.clone(),
         last_term_size.clone(),
-        terminal_engine_mode,
         sftp_handles.clone(),
         sftp_manual_nav.clone(),
         tab_statuses.clone(),
@@ -218,6 +220,47 @@ pub fn run() -> Result<()> {
             if let Some(w) = weak.upgrade() {
                 w.set_lang_en(crate::i18n::is_en());
                 w.invoke_refresh_sidebar();
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        window.on_set_terminal_engine_mode(move |mode| {
+            let requested_mode = TerminalEngineMode::from_str(mode.as_str());
+            let effective_mode = {
+                let mut s = store.borrow_mut();
+                s.set_terminal_engine_mode(requested_mode);
+                if let Err(err) = s.save() {
+                    tracing::warn!("failed to save config: {err:#}");
+                }
+                s.terminal_engine_mode()
+            };
+            let message =
+                if TerminalEngineMode::from_env().is_some() && effective_mode != requested_mode {
+                    format!(
+                        "{}: {}",
+                        t(
+                            "终端引擎配置已保存；当前仍由环境变量覆盖",
+                            "Terminal engine setting saved; environment override still wins"
+                        ),
+                        effective_mode.as_str()
+                    )
+                } else {
+                    format!(
+                        "{}: {}",
+                        t(
+                            "终端引擎已更新，新建会话生效",
+                            "Terminal engine updated; new sessions only"
+                        ),
+                        effective_mode.as_str()
+                    )
+                };
+            if let Some(w) = weak.upgrade() {
+                w.set_terminal_engine_mode(effective_mode.as_str().into());
+                w.set_settings_hint(message.clone().into());
+                w.set_ssh_import_hint(message.into());
             }
         });
     }

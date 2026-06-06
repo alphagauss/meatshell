@@ -22,7 +22,7 @@
 6. `build.rs` 负责编译 Slint UI、打包翻译文件，并在 Windows 上嵌入图标
 7. `src/app/state.rs` 保存少量跨组件 UI 布局状态，当前只覆盖侧边栏、底部面板显示和底部面板页签
 8. `src/connection.rs` 保存每个终端 tab 的连接运行态，统一包装 SSH session 的连接、断开、重连和状态
-9. `src/terminal/mod.rs` 是终端核心模块入口；`src/terminal/types.rs` / `src/terminal/engine.rs` 定义终端渲染数据、引擎模式和最小终端引擎 trait，`src/terminal/legacy.rs` 提供 legacy vt100 实现，`src/terminal/alacritty.rs` 提供可选实验 alacritty 引擎
+9. `src/terminal/mod.rs` 是终端核心模块入口；`src/terminal/types.rs` / `src/terminal/engine.rs` 定义终端渲染数据、引擎模式和最小终端引擎 trait，`src/terminal/legacy.rs` 提供 legacy vt100 fallback 实现，`src/terminal/alacritty.rs` 提供可选的 Alacritty Experimental 引擎
 10. `src/file_transfer.rs`、`src/app/transfer.rs` 和 `ui/transfer_window.slint` 提供独立文件传输窗口第一版；远程侧复用 `src/sftp.rs` worker
 11. `src/tunnel.rs`、`src/app/tunnels.rs` 和 `ui/tunnel_panel.slint` 提供当前 session 关联的 Local Forward 隧道规则、持久化和后台转发任务
 
@@ -55,7 +55,7 @@
 - 顶层 UI 状态机和 glue code
 - 初始化 `src/app/state.rs` 里的 `AppState`，并把默认布局状态同步到 Slint 窗口属性
 - 通过 `ConnectionManager` 管理每个终端 tab 的 SSH runtime
-- 持有当前终端 wrapper，默认走 legacy vt100，引擎模式为 `MEATSHELL_TERMINAL_ENGINE=alacritty` 时委托到实验 alacritty 引擎
+- 持有当前终端 wrapper，默认走 legacy vt100 fallback；新建会话时按 `ConfigStore::terminal_engine_mode()` 选择是否委托到 Alacritty Experimental，引擎环境变量 `MEATSHELL_TERMINAL_ENGINE` 仍优先于配置
 - 维护 tabs / terminals / SFTP 状态
 - 把 Slint 回调路由到 SSH / SFTP / 配置 / 系统采样模块
 - 基础状态布局、平台 helper、layout / events / sidebar / session / tab / sftp panel / transfer / tunnel / terminal-input / terminal-render / model 的 UI glue 分别拆到 `src/app/state.rs`、`src/app/types.rs`、`src/app/platform.rs`、`src/app/layout.rs`、`src/app/events.rs`、`src/app/sidebar.rs`、`src/app/sessions.rs`、`src/app/tabs.rs`、`src/app/sftp_panel.rs`、`src/app/transfer.rs`、`src/app/tunnels.rs`、`src/app/terminal_input.rs`、`src/app/terminal_render.rs` 和 `src/app/models.rs`；legacy vt100 引擎核心放在 `src/terminal/legacy.rs`
@@ -165,6 +165,7 @@
 职责：
 - 保存会话列表模型同步和会话对话框 / 连接入口的 UI glue
 - 负责把 `ConfigStore`、会话模型和连接启动逻辑接到 Slint 回调
+- `connect-session` 回调里即时读取 `ConfigStore::terminal_engine_mode()`，因此设置里的终端引擎切换只影响新建会话，不影响已有 tab / reconnect
 
 关键符号：
 - `sync_sessions_to_model(...)`
@@ -318,7 +319,7 @@
 ### `src/terminal/engine.rs`
 职责：
 - 定义最小 `TerminalEngine` trait
-- 定义 `TerminalEngineMode`，当前通过启动前环境变量 `MEATSHELL_TERMINAL_ENGINE=alacritty` 选择实验引擎，否则默认 legacy
+- 定义 `TerminalEngineMode`，支持 `legacy` / `alacritty` 字符串、环境变量 `MEATSHELL_TERMINAL_ENGINE` 读取，以及 `mouse_reporting` / `application_cursor` / `bracketed_paste` 能力查询
 - trait 由 `src/terminal/legacy.rs` 中的 `LegacyTerminalEngine` wrapper 和 `src/terminal/alacritty.rs` 中的实验引擎实现
 
 关键符号：
@@ -330,7 +331,7 @@
 - 包装 `alacritty_terminal`，实现实验终端引擎
 - 接收 SSH 输出 bytes，交给 alacritty parser 更新终端状态
 - 把 alacritty grid/cell 转换为 `BuiltScreen<RenderSpan>`，不把 alacritty 内部类型泄漏到 `app/mod.rs` 或 Slint
-- 支持基础 resize，并从 alacritty `TermMode` 暴露 SGR mouse reporting 状态给 UI
+- 支持基础 resize，并从 alacritty `TermMode` 暴露 mouse reporting / application cursor / bracketed paste 状态给 UI
 
 关键符号：
 - `AlacrittyTerminalEngine`
@@ -423,7 +424,7 @@
 职责：
 - 会话配置落盘与读取
 - 凭据包装
-- 下载目录、UI 语言，以及每个 Session 的可选出站代理持久化
+- 下载目录、UI 语言、默认终端引擎，以及每个 Session 的可选出站代理持久化
 
 关键符号：
 - `Secret`
@@ -440,6 +441,8 @@
 - `ConfigStore::set_download_dir(...)`
 - `ConfigStore::language(...)`
 - `ConfigStore::set_language(...)`
+- `ConfigStore::terminal_engine_mode(...)`
+- `ConfigStore::set_terminal_engine_mode(...)`
 
 定位提示：
 - 任何 session 字段新增 / 删除，先看这里，再看 `ui/session_dialog.slint`、`ui/welcome.slint` 和 `src/proxy.rs`
@@ -510,6 +513,7 @@
 - 顶层窗口 `AppWindow`
 - 定义 Rust 侧需要的全部回调和模型字段
 - 组装左侧栏、Tab 栏、顶部工具栏、欢迎页、终端页、底部面板、会话对话框
+- 右上角 settings popup 继续承载导入 `~/.ssh/config`、语言切换、终端引擎默认值切换和 About 入口
 - 暴露 `sidebar-visible`、`bottom-panel-visible`、`bottom-panel-tab` 布局状态给 Rust 侧 `AppState`
 - 暴露当前 active session 的 `tunnel-rules` 模型和隧道规则增删改/启用回调给 Rust
 
@@ -525,6 +529,8 @@
 - `disconnect-active-tab`
 - `reconnect-active-tab`
 - `open-transfer-window`
+- `terminal-engine-mode`
+- `set-terminal-engine-mode`
 - `tunnel-add-rule`
 - `tunnel-update-rule`
 - `tunnel-toggle-rule`
@@ -688,6 +694,7 @@
 ## 5. 资源与数据目录
 
 - `plan.md`：阶段执行计划和完成状态；每完成一个阶段后更新对应勾选项
+- `docs/terminal-test-cases.md`：Legacy fallback / Alacritty Experimental 的手测清单
 - `tunnels.json`：运行时生成的用户配置文件，保存 Local Forward 隧道规则（位于系统配置目录，不在仓库内）
 - `lang/zh/LC_MESSAGES/meatshell.po` 和 `lang/en/LC_MESSAGES/meatshell.po`：翻译资源
 - `.github/workflows/release.yml`：打 tag / 手动发布的构建与上传 workflow

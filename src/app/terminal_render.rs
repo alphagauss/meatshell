@@ -119,8 +119,9 @@ pub(super) fn rebuild_tab_display(win: &AppWindow, bufs: &TermBuffers, tab_id: &
             return;
         };
         let cols = buf.parser.screen().size().1;
-        let b = TerminalEngine::render(buf); // also refreshes buf.displayed_text
-        let matches = compute_find_matches(&buf.displayed_text, &buf.find_query);
+        let b = TerminalEngine::render(buf);
+        let displayed_text = buf.displayed_text();
+        let matches = compute_find_matches(&displayed_text, &buf.find_query);
         let sel = match buf.sel {
             Some((sr, sc, er, ec)) => selection_rects(sr, sc, er, ec, cols),
             None => Vec::new(),

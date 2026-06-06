@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use zeroize::Zeroize;
 
+use crate::terminal::engine::TerminalEngineMode;
+
 /// A secret string (e.g. a session password) whose heap buffer is zeroed when
 /// it is dropped, so plaintext credentials don't survive in freed memory and
 /// turn up in core dumps, a debugger, or `/proc/<pid>/mem`.  `Clone` makes an
@@ -137,6 +139,8 @@ pub struct ConfigFile {
     /// UI language code: "zh" (default) or "en".
     #[serde(default)]
     pub language: String,
+    #[serde(default)]
+    pub terminal_engine: Option<String>,
 }
 
 pub struct ConfigStore {
@@ -227,6 +231,22 @@ impl ConfigStore {
 
     pub fn set_language(&mut self, lang: String) {
         self.cache.language = lang;
+    }
+
+    pub fn terminal_engine_mode(&self) -> TerminalEngineMode {
+        if let Some(mode) = TerminalEngineMode::from_env() {
+            return mode;
+        }
+
+        self.cache
+            .terminal_engine
+            .as_deref()
+            .map(TerminalEngineMode::from_str)
+            .unwrap_or(TerminalEngineMode::Legacy)
+    }
+
+    pub fn set_terminal_engine_mode(&mut self, mode: TerminalEngineMode) {
+        self.cache.terminal_engine = Some(mode.as_str().to_string());
     }
 
     pub fn save(&self) -> Result<()> {

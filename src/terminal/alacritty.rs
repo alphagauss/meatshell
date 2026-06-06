@@ -1,3 +1,5 @@
+use std::cell::{Ref, RefCell};
+
 use alacritty_terminal::event::VoidListener;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column as AColumn, Line as ALine};
@@ -5,7 +7,7 @@ use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor, Rgb};
 
-use super::engine::TerminalEngine;
+use super::engine::{TerminalEngine, TerminalEngineMode};
 use super::types::{BuiltScreen, RenderSpan};
 
 struct AlacrittyDimensions {
@@ -30,7 +32,7 @@ impl Dimensions for AlacrittyDimensions {
 pub struct AlacrittyTerminalEngine {
     term: Term<VoidListener>,
     parser: Processor,
-    displayed_text: Vec<String>,
+    displayed_text: RefCell<Vec<String>>,
 }
 
 impl AlacrittyTerminalEngine {
@@ -42,28 +44,25 @@ impl AlacrittyTerminalEngine {
         Self {
             term: Term::new(Config::default(), &dimensions, VoidListener),
             parser: Processor::new(),
-            displayed_text: Vec::new(),
+            displayed_text: RefCell::new(Vec::new()),
         }
     }
 
-    pub fn displayed_text(&self) -> &[String] {
-        &self.displayed_text
-    }
-
-    pub fn mouse_reporting(&self) -> bool {
-        let mode = self.term.mode();
-        mode.intersects(TermMode::MOUSE_MODE) && mode.contains(TermMode::SGR_MOUSE)
+    pub fn displayed_text(&self) -> Ref<'_, Vec<String>> {
+        self.displayed_text.borrow()
     }
 }
 
 impl TerminalEngine for AlacrittyTerminalEngine {
-    type Screen = BuiltScreen<RenderSpan>;
+    fn mode(&self) -> TerminalEngineMode {
+        TerminalEngineMode::Alacritty
+    }
 
     fn ingest(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
     }
 
-    fn render(&mut self) -> Self::Screen {
+    fn render(&self) -> BuiltScreen<RenderSpan> {
         let rows = self.term.screen_lines();
         let cols = self.term.columns();
         let cursor = self.term.grid().cursor.point;
@@ -113,7 +112,7 @@ impl TerminalEngine for AlacrittyTerminalEngine {
             displayed.push(plain.trim_end().to_string());
         }
 
-        self.displayed_text = displayed;
+        self.displayed_text.replace(displayed);
         BuiltScreen {
             spans,
             cursor_row: cursor.line.0,
@@ -128,11 +127,24 @@ impl TerminalEngine for AlacrittyTerminalEngine {
         }
     }
 
-    fn resize(&mut self, rows: u16, cols: u16) {
+    fn resize(&mut self, rows: usize, cols: usize) {
         self.term.resize(AlacrittyDimensions {
-            columns: cols.max(1) as usize,
-            screen_lines: rows.max(1) as usize,
+            columns: cols.max(1),
+            screen_lines: rows.max(1),
         });
+    }
+
+    fn mouse_reporting(&self) -> bool {
+        let mode = self.term.mode();
+        mode.intersects(TermMode::MOUSE_MODE) && mode.contains(TermMode::SGR_MOUSE)
+    }
+
+    fn application_cursor(&self) -> bool {
+        self.term.mode().contains(TermMode::APP_CURSOR)
+    }
+
+    fn bracketed_paste(&self) -> bool {
+        self.term.mode().contains(TermMode::BRACKETED_PASTE)
     }
 }
 

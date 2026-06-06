@@ -66,7 +66,7 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 
 ### v0.2
 
-- [ ] 完整 VT/ANSI 终端模拟（`alacritty_terminal` 实验引擎已可选启用，鼠标/TUI 仍在后续阶段）
+- [ ] 完整 VT/ANSI 终端模拟（Alacritty Experimental 为后续主线优化方向；legacy 仍保留为 fallback，当前不宣称已完整覆盖）
 - [ ] 远端主机资源监控（与 FinalShell 一样执行远端脚本收集）
 - [x] SFTP 文件浏览 + 拖拽上传/下载
 - [x] 顶部工具栏骨架：侧边栏、底部面板、断开、重连、文件传输入口
@@ -91,7 +91,7 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 | UI            | [Slint](https://slint.dev)（纯 Rust 编译，无 GC）                 |
 | 异步运行时    | [`tokio`](https://tokio.rs)                                       |
 | SSH 协议      | [`russh`](https://crates.io/crates/russh)（无 libssh 依赖）       |
-| 终端解析      | 默认 legacy `vt100`；实验 [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) |
+| 终端解析      | 默认 legacy `vt100` fallback；[`alacritty_terminal`](https://crates.io/crates/alacritty_terminal) 为 Experimental 主线优化方向 |
 | 隧道转发      | `russh` direct-tcpip + `tokio` TCP 转发                         |
 | 系统指标      | [`sysinfo`](https://crates.io/crates/sysinfo)                     |
 | 序列化        | `serde` + `serde_json`                                            |
@@ -103,7 +103,9 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 cargo run --release
 ```
 
-实验性的 alacritty 终端引擎默认不启用；需要启动前设置环境变量：
+终端引擎默认使用 legacy fallback。设置菜单或 `sessions.json` 可保存默认引擎，但只对**新建会话**生效；已打开的 tab 和 reconnect 不会热切换。
+
+`MEATSHELL_TERMINAL_ENGINE` 仍然优先于配置文件；需要强制覆盖时，启动前设置环境变量：
 
 ```bash
 MEATSHELL_TERMINAL_ENGINE=alacritty cargo run --release
@@ -122,11 +124,11 @@ $env:MEATSHELL_TERMINAL_ENGINE = "alacritty"; cargo run --release
 - 顶部工具栏：切换左侧资源栏、切换底部面板、断开当前 tab、重连当前 tab、打开独立文件传输窗口。
 - 文件传输窗口：在已连接的终端 tab 上点击工具栏文件传输按钮，左侧浏览本机目录，右侧浏览当前远程 session，支持基础上传/下载。
 - 隧道：底部 **“隧道”** 页签支持 Local Forward。新增规则后填写 `本地地址:端口 -> 远端地址:端口`，保存并启用；该 session 下 enabled 规则会在终端连接成功后自动启动，断开或关闭 tab 时停止。
-- 终端引擎：默认使用 legacy `vt100`；启动前设置 `MEATSHELL_TERMINAL_ENGINE=alacritty` 可切换到实验 alacritty 引擎。
+- 终端引擎：默认使用 legacy fallback；设置菜单可保存默认引擎，效果只作用于新建会话；`MEATSHELL_TERMINAL_ENGINE` 会覆盖配置；Alacritty 仍按 Experimental / 主线优化中处理。
 
 ## 配置文件
 
-`sessions.json` 保存会话、语言和下载目录；`tunnels.json` 单独保存隧道规则，不写入会话结构。
+`sessions.json` 保存会话、语言、下载目录和默认终端引擎；`tunnels.json` 单独保存隧道规则，不写入会话结构。
 
 默认配置目录：
 
@@ -134,7 +136,7 @@ $env:MEATSHELL_TERMINAL_ENGINE = "alacritty"; cargo run --release
 - Linux：`~/.config/meatshell`
 - macOS：`~/Library/Application Support/dev.meatshell.meatshell`
 
-终端引擎模式目前只由启动前环境变量控制；侧边栏/底部面板默认显示状态暂不持久化。
+终端引擎默认值可通过设置菜单或 `sessions.json` 顶层 `terminal_engine` 保存；该设置只对新建会话生效。`MEATSHELL_TERMINAL_ENGINE` 仍然优先于配置文件。侧边栏/底部面板默认显示状态暂不持久化。
 
 ## 项目布局
 
@@ -187,9 +189,9 @@ meatshell/
     ├── tunnel.rs            # Local Forward 隧道规则与后台转发任务
     └── terminal/
         ├── mod.rs
-        ├── alacritty.rs     # alacritty 实验终端引擎
+        ├── alacritty.rs     # Alacritty Experimental 终端引擎
         ├── engine.rs        # 终端引擎 trait
-        ├── legacy.rs        # legacy vt100 实现
+        ├── legacy.rs        # legacy vt100 fallback 实现
         └── types.rs         # 终端渲染数据类型
 ```
 

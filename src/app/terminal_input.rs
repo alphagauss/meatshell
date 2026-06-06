@@ -42,7 +42,7 @@ pub(super) fn wire_key_input(
                         // Typing snaps the view back to the live bottom so the
                         // user always sees what they're entering.
                         b.view_offset = 0;
-                        b.parser.screen().application_cursor()
+                        TerminalEngine::application_cursor(b)
                     }
                     None => false,
                 }
@@ -297,7 +297,7 @@ pub(super) fn wire_key_input(
                     }
                     buf.parser.process(format!("\x1b[{delta}S").as_bytes());
                 }
-                TerminalEngine::resize(buf, new_rows, cols as u16);
+                TerminalEngine::resize(buf, new_rows as usize, cols as usize);
                 // The pre/post-resize screens differ in size+content; drop the
                 // scroll-detection snapshot so the next output isn't mis-read as
                 // a scroll (which would double-capture lines).
@@ -340,9 +340,10 @@ pub(super) fn wire_key_input(
                         // whole displayed screen.
                         match buf.sel {
                             Some((sr, sc, er, ec)) if (sr, sc) != (er, ec) => {
-                                extract_selection(&buf.displayed_text, sr, sc, er, ec)
+                                let displayed_text = buf.displayed_text();
+                                extract_selection(&displayed_text, sr, sc, er, ec)
                             }
-                            _ => buf.displayed_text.join("\n"),
+                            _ => buf.displayed_text().join("\n"),
                         }
                     }
                     None => String::new(),
@@ -364,16 +365,24 @@ pub(super) fn wire_key_input(
     // Middle-click / Ctrl+Shift+V: paste clipboard text into PTY.
     {
         let connections = connections.clone();
+        let bufs = bufs.clone();
         window.on_paste_from_clipboard(move |tab_id: SharedString| {
             let connections = connections.clone();
+            let bufs = bufs.clone();
             let tid = tab_id.to_string();
             std::thread::spawn(move || {
                 match arboard::Clipboard::new().and_then(|mut cb| cb.get_text()) {
                     Ok(text) => {
-                        connections
-                            .lock()
-                            .unwrap()
-                            .send_raw(&tid, text.into_bytes());
+                        let payload = {
+                            let map = bufs.lock().unwrap();
+                            match map.get(&tid) {
+                                Some(buf) if TerminalEngine::bracketed_paste(buf) => {
+                                    format!("\x1b[200~{text}\x1b[201~").into_bytes()
+                                }
+                                _ => text.into_bytes(),
+                            }
+                        };
+                        connections.lock().unwrap().send_raw(&tid, payload);
                     }
                     Err(e) => tracing::warn!("paste_from_clipboard: clipboard error: {}", e),
                 }
@@ -400,7 +409,7 @@ pub(super) fn wire_key_input(
                 buf.prev = Vec::new();
                 buf.view_offset = 0;
                 buf.sel = None;
-                buf.displayed_text = Vec::new();
+                buf.displayed_text.replace(Vec::new());
                 buf.csi_state = CsiState::Normal;
             }
             if let Some(win) = weak.upgrade() {
@@ -429,7 +438,8 @@ pub(super) fn wire_key_input(
                 let mut map = bufs_find.lock().unwrap();
                 if let Some(buf) = map.get_mut(&tid) {
                     buf.find_query = q.clone();
-                    compute_find_matches(&buf.displayed_text, &q)
+                    let displayed_text = buf.displayed_text();
+                    compute_find_matches(&displayed_text, &q)
                 } else {
                     Vec::new()
                 }
@@ -515,7 +525,8 @@ pub(super) fn wire_key_input(
                 let Some(buf) = map.get_mut(&tid) else { return };
                 match buf.sel {
                     Some((sr, sc, er, ec)) if (sr, sc) != (er, ec) => {
-                        Some(extract_selection(&buf.displayed_text, sr, sc, er, ec))
+                        let displayed_text = buf.displayed_text();
+                        Some(extract_selection(&displayed_text, sr, sc, er, ec))
                     }
                     _ => {
                         buf.sel = None; // treat as click → clear selection

@@ -97,15 +97,18 @@ export component AppWindow inherits Window {
     in-out property <bool> download-open: false;  // download manager popup
     in-out property <bool> settings-open: false;  // settings menu popup
     in-out property <bool> about-open: false;     // centered About dialog
+    in-out property <string> settings-hint;
     in property <string> download-dir;      // preset SFTP download folder ("" = ask)
     in property <[TransferInfo]> transfers; // download/upload records (newest first)
     in property <[string]> about-libs;      // open-source libraries used
     in-out property <bool> lang-en: false;  // current UI language (false = 中文)
+    in-out property <string> terminal-engine-mode: "legacy";
     in-out property <length> sftp-panel-height: 220px; // shared; lets Rust locate the drop zone
     callback pick-download-dir();            // open a folder picker
     callback open-download-dir();            // reveal the folder in the OS
     callback clear-transfers();              // wipe the transfer history
     callback set-language(string);           // switch UI language ("zh" / "en")
+    callback set-terminal-engine-mode(string);
 
     // --- Session list ------------------------------------------------------
     in property <[SessionInfo]> sessions;
@@ -341,6 +344,9 @@ export component AppWindow inherits Window {
             clicked => {
                 root.settings-open = !root.settings-open;
                 root.download-open = false;
+                if (root.settings-open) {
+                    root.settings-hint = "";
+                }
             }
         }
         Text {
@@ -566,7 +572,7 @@ export component AppWindow inherits Window {
         x: parent.width - 196px;
         y: 40px;
         width: 198px;
-        height: 104px;
+        height: 156px;
         visible: root.settings-open;
         background: Theme.bg-panel;
         border-radius: Theme.radius-md;
@@ -626,6 +632,35 @@ export component AppWindow inherits Window {
             Rectangle {
                 height: 28px;
                 border-radius: Theme.radius-sm;
+                background: engine-ta.has-hover ? Theme.bg-hover : transparent;
+                engine-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.set-terminal-engine-mode(
+                            root.terminal-engine-mode == "legacy" ? "alacritty" : "legacy"
+                        );
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    Text { text: ">"; color: Theme.text-secondary; font-size: Theme.fs-sm;
+                           vertical-alignment: center; }
+                    Text { text: root.lang-en ? "Terminal engine" : "终端引擎";
+                           color: Theme.text-primary; font-size: Theme.fs-md;
+                           vertical-alignment: center; horizontal-stretch: 1; }
+                    Text {
+                        text: root.terminal-engine-mode == "legacy" ? "Legacy" : "Alacritty Exp";
+                        color: Theme.text-muted;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+            Rectangle {
+                height: 28px;
+                border-radius: Theme.radius-sm;
                 background: about-ta.has-hover ? Theme.bg-hover : transparent;
                 about-ta := TouchArea {
                     mouse-cursor: pointer;
@@ -642,6 +677,12 @@ export component AppWindow inherits Window {
                     Text { text: @tr("About"); color: Theme.text-primary; font-size: Theme.fs-md;
                            vertical-alignment: center; horizontal-stretch: 1; }
                 }
+            }
+            if root.settings-hint != "" : Text {
+                text: root.settings-hint;
+                color: Theme.text-muted;
+                font-size: Theme.fs-xs;
+                wrap: word-wrap;
             }
         }
     }

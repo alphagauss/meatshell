@@ -223,8 +223,9 @@ pub(super) fn apply_session_event_to_window(
                     // current view (live or scrolled-back).
                     TerminalEngine::ingest(buf, chunk.as_bytes());
                     let cols = buf.parser.screen().size().1;
-                    let b = TerminalEngine::render(buf); // refreshes buf.displayed_text
-                    let matches = compute_find_matches(&buf.displayed_text, &buf.find_query);
+                    let b = TerminalEngine::render(buf);
+                    let displayed_text = buf.displayed_text();
+                    let matches = compute_find_matches(&displayed_text, &buf.find_query);
                     let sel = match buf.sel {
                         Some((sr, sc, er, ec)) => selection_rects(sr, sc, er, ec, cols),
                         None => Vec::new(),
