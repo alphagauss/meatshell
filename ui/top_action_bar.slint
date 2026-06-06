@@ -1,0 +1,102 @@
+import { Theme } from "theme.slint";
+
+component ActionButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> tooltip;
+    callback clicked();
+
+    width: 28px;
+    height: 28px;
+    border-radius: Theme.radius-sm;
+    background: touch.has-hover ? Theme.bg-hover : transparent;
+
+    Text {
+        text: root.icon;
+        font-family: "Material Icons";
+        color: touch.has-hover ? Theme.text-primary : Theme.text-secondary;
+        font-size: 18px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    if touch.has-hover : Rectangle {
+        x: 0px;
+        y: 30px;
+        width: tip.preferred-width + 14px;
+        height: 24px;
+        border-radius: Theme.radius-sm;
+        background: Theme.bg-elevated;
+        border-width: 1px;
+        border-color: Theme.border-subtle;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: #00000040;
+
+        tip := Text {
+            x: 7px;
+            text: root.tooltip;
+            color: Theme.text-primary;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component TopActionBar inherits Rectangle {
+    in property <bool> sidebar-visible: true;
+    in property <bool> bottom-panel-visible: true;
+
+    callback toggle-sidebar();
+    callback toggle-bottom-panel();
+    callback disconnect-active-tab();
+    callback reconnect-active-tab();
+    callback open-transfer-window();
+
+    height: 34px;
+    background: Theme.bg-panel;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 4px;
+        alignment: start;
+
+        ActionButton {
+            icon: root.sidebar-visible ? "\u{E5D2}" : "\u{E5D2}";
+            tooltip: @tr("Toggle sidebar");
+            clicked => { root.toggle-sidebar(); }
+        }
+
+        ActionButton {
+            icon: root.bottom-panel-visible ? "\u{E5DB}" : "\u{E5D8}";
+            tooltip: @tr("Toggle file panel");
+            clicked => { root.toggle-bottom-panel(); }
+        }
+
+        Rectangle { width: 1px; height: 20px; background: Theme.border-subtle; }
+
+        ActionButton {
+            icon: "\u{E8AC}";
+            tooltip: @tr("Disconnect");
+            clicked => { root.disconnect-active-tab(); }
+        }
+
+        ActionButton {
+            icon: "\u{E5D5}";
+            tooltip: @tr("Reconnect");
+            clicked => { root.reconnect-active-tab(); }
+        }
+
+        ActionButton {
+            icon: "\u{E2C6}";
+            tooltip: @tr("New transfer window");
+            clicked => { root.open-transfer-window(); }
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+    }
+}

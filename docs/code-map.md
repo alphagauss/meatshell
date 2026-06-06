@@ -46,6 +46,8 @@
 
 关键符号：
 - `run()`
+- `sync_app_state_to_window(...)`
+- `wire_app_state_callbacks(...)`
 - `wire_session_callbacks(...)`
 - `wire_tab_callbacks(...)`
 - `wire_sftp_callbacks(...)`
@@ -98,7 +100,7 @@
 ### `src/app_state.rs`
 职责：
 - 保存少量全局 UI 布局状态，避免继续把阶段 2 的工具栏/底部面板状态直接散落在 `src/app.rs`
-- 当前只包含 `sidebar_visible`、`bottom_panel_visible`、`bottom_panel_tab`
+- 当前只包含 `sidebar_visible`、`bottom_panel_visible`、`bottom_panel_tab`，以及对应的 toggle / tab select 方法
 
 关键符号：
 - `AppState`
@@ -273,13 +275,19 @@
 职责：
 - 顶层窗口 `AppWindow`
 - 定义 Rust 侧需要的全部回调和模型字段
-- 组装左侧栏、Tab 栏、欢迎页、终端页、SFTP 面板、会话对话框
+- 组装左侧栏、Tab 栏、顶部工具栏、欢迎页、终端页、底部面板、会话对话框
 - 暴露 `sidebar-visible`、`bottom-panel-visible`、`bottom-panel-tab` 布局状态给 Rust 侧 `AppState`
 
 关键符号：
 - `AppWindow`
 - `TransferInfo`
 - `TerminalState`
+- `toggle-sidebar`
+- `toggle-bottom-panel`
+- `select-bottom-panel-tab`
+- `disconnect-active-tab`
+- `reconnect-active-tab`
+- `open-transfer-window`
 - `dialog-proxy`
 - 导出类型：`SessionInfo`、`SessionDraft`、`TabInfo`、`SftpEntry`、`SftpTreeNode`
 
@@ -293,7 +301,7 @@
 - 终端格子渲染
 - 隐藏 IME 输入
 - 搜索高亮、拖拽选区、右键菜单、滚轮滚动
-- 底部 SFTP 面板承载
+- 底部 `BottomPanel` 承载
 - 根据 `bottom-panel-visible` / `bottom-panel-tab` 决定当前底部文件面板是否显示
 
 关键符号：
@@ -304,6 +312,31 @@
 
 定位提示：
 - 终端交互问题，先看这里，再看 `src/app.rs` 的键盘和渲染代码
+
+### `ui/top_action_bar.slint`
+职责：
+- 标签页下方的固定工具栏
+- 提供侧边栏显隐、底部面板显隐、断开、重连、新建文件传输按钮
+
+关键符号：
+- `TopActionBar`
+
+### `ui/bottom_panel.slint`
+职责：
+- 底部“文件 / 隧道”页签外壳
+- `Files` 页继续承载现有 `SftpPanel`
+- `Tunnels` 页承载 `TunnelPanel` 空状态
+
+关键符号：
+- `BottomPanel`
+- `PanelTab`
+
+### `ui/tunnel_panel.slint`
+职责：
+- 隧道页签第一版空状态，真实规则管理在后续阶段实现
+
+关键符号：
+- `TunnelPanel`
 
 ### `ui/sidebar.slint`
 职责：

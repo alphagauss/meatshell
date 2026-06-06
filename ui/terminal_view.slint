@@ -1,5 +1,6 @@
 import { Theme } from "theme.slint";
-import { SftpPanel, SftpEntry, SftpTreeNode } from "sftp_panel.slint";
+import { BottomPanel } from "bottom_panel.slint";
+import { SftpEntry, SftpTreeNode } from "sftp_panel.slint";
 
 // Embed the terminal fonts here too so the cell-probe Text below measures
 // with the CORRECT font (Cascadia Mono), not a system fallback.  Font imports
@@ -93,6 +94,7 @@ export component TerminalView inherits Rectangle {
     callback send-key(string, bool, bool, bool);
     callback terminal-resize(float, float);
     callback sftp-navigate(string);
+    callback select-bottom-panel-tab(string);
     callback sftp-download(string);
     callback sftp-upload-clicked(string);
     callback sftp-refresh(string);
@@ -609,8 +611,8 @@ export component TerminalView inherits Rectangle {
 
         // --- Drag handle ----------------------------------------------------
         Rectangle {
-            visible: root.bottom-panel-visible && root.bottom-panel-tab == "files";
-            height: root.bottom-panel-visible && root.bottom-panel-tab == "files" ? 4px : 0px;
+            visible: root.bottom-panel-visible;
+            height: root.bottom-panel-visible ? 4px : 0px;
             background: divider-ta.has-hover || root.sftp-dragging
                 ? Theme.accent
                 : Theme.border-subtle;
@@ -639,15 +641,17 @@ export component TerminalView inherits Rectangle {
             }
         }
 
-        // --- SFTP panel -----------------------------------------------------
-        SftpPanel {
-            visible: root.bottom-panel-visible && root.bottom-panel-tab == "files";
-            height: root.bottom-panel-visible && root.bottom-panel-tab == "files" ? root.sftp-panel-height : 0px;
-            current-path:  root.sftp-path;
-            entries:       root.sftp-entries;
-            status:        root.sftp-status;
-            loading:       root.sftp-loading;
-            tree-nodes:    root.sftp-tree-nodes;
+        // --- Bottom panel ---------------------------------------------------
+        BottomPanel {
+            visible: root.bottom-panel-visible;
+            height: root.bottom-panel-visible ? root.sftp-panel-height : 0px;
+            active-tab: root.bottom-panel-tab;
+            current-path: root.sftp-path;
+            entries: root.sftp-entries;
+            status: root.sftp-status;
+            loading: root.sftp-loading;
+            tree-nodes: root.sftp-tree-nodes;
+            select-tab(tab) => { root.select-bottom-panel-tab(tab); }
             navigate(path)      => { root.sftp-navigate(path); }
             download(path)      => { root.sftp-download(path); }
             upload-clicked(dir) => { root.sftp-upload-clicked(dir); }

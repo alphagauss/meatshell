@@ -73,6 +73,8 @@ xattr -dr com.apple.quarantine meatshell     # clear the "unsigned app" Gatekeep
 - [ ] Full VT/ANSI terminal emulation (integrate [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal))
 - [ ] Remote host resource monitoring (run a remote collector script, like FinalShell)
 - [x] SFTP file browser + drag-and-drop upload/download
+- [x] Top toolbar shell: sidebar, bottom panel, disconnect, reconnect, transfer entry
+- [x] Bottom Files / Tunnels tab shell (Files continues to use the SFTP panel)
 - [ ] Known-hosts (`known_hosts`) verification
 - [ ] Store session passwords in the OS keychain
 
@@ -116,6 +118,9 @@ meatshell/
 │   ├── widgets.slint        # reusable buttons / inputs / sparkline
 │   ├── sidebar.slint        # left-hand system monitor panel
 │   ├── tabs.slint           # top tab bar
+│   ├── top_action_bar.slint # toolbar below the tab bar
+│   ├── bottom_panel.slint   # bottom Files / Tunnels tab shell
+│   ├── tunnel_panel.slint   # tunnel tab empty state
 │   ├── welcome.slint        # welcome page / quick connect
 │   ├── session_dialog.slint # new / edit session dialog
 │   └── terminal_view.slint  # terminal view (v0.1 line-buffered)

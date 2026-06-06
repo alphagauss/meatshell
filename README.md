@@ -69,6 +69,8 @@ xattr -dr com.apple.quarantine meatshell     # 去掉「未签名应用」的 Ga
 - [ ] 完整 VT/ANSI 终端模拟（接入 [`alacritty_terminal`](https://crates.io/crates/alacritty_terminal)）
 - [ ] 远端主机资源监控（与 FinalShell 一样执行远端脚本收集）
 - [x] SFTP 文件浏览 + 拖拽上传/下载
+- [x] 顶部工具栏骨架：侧边栏、底部面板、断开、重连、文件传输入口
+- [x] 底部“文件 / 隧道”页签骨架（文件页继续使用 SFTP 面板）
 - [ ] 已知主机 (known_hosts) 校验
 - [ ] 会话密码使用 OS 钥匙串存储
 
@@ -111,6 +113,9 @@ meatshell/
 │   ├── widgets.slint        # 可复用按钮 / 输入框 / sparkline
 │   ├── sidebar.slint        # 左侧系统监控面板
 │   ├── tabs.slint           # 顶部标签栏
+│   ├── top_action_bar.slint # 标签页下方工具栏
+│   ├── bottom_panel.slint   # 底部文件 / 隧道页签外壳
+│   ├── tunnel_panel.slint   # 隧道页签空状态
 │   ├── welcome.slint        # 欢迎页 / 快速连接
 │   ├── session_dialog.slint # 新建 / 编辑会话弹框
 │   └── terminal_view.slint  # 终端视图（v0.1 行缓冲）

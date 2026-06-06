@@ -1,0 +1,17 @@
+import { Theme } from "theme.slint";
+
+export component TunnelPanel inherits Rectangle {
+    background: Theme.bg-panel;
+
+    VerticalLayout {
+        alignment: center;
+        padding: 16px;
+
+        Text {
+            text: @tr("Tunnel rules will appear here.");
+            color: Theme.text-muted;
+            font-size: Theme.fs-md;
+            horizontal-alignment: center;
+        }
+    }
+}

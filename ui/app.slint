@@ -12,6 +12,7 @@ import "fonts/MaterialIcons-Regular.ttf";
 import { Theme } from "theme.slint";
 import { Sidebar, DiskInfo } from "sidebar.slint";
 import { TabBar, TabInfo } from "tabs.slint";
+import { TopActionBar } from "top_action_bar.slint";
 import { Welcome, SessionInfo } from "welcome.slint";
 import { SessionDialog, SessionDraft } from "session_dialog.slint";
 import { TerminalView, TermSpan, TermMatch } from "terminal_view.slint";
@@ -138,6 +139,12 @@ export component AppWindow inherits Window {
     callback tab-selected(string);
     callback tab-closed(string);
     callback new-tab-clicked();
+    callback toggle-sidebar();
+    callback toggle-bottom-panel();
+    callback select-bottom-panel-tab(string);
+    callback disconnect-active-tab();
+    callback reconnect-active-tab();
+    callback open-transfer-window();
     // Asks Rust to recompute the sidebar (status + resources) for whatever tab
     // is now active.  Fired on every active-tab change, UI- or code-driven.
     callback refresh-sidebar();
@@ -224,6 +231,16 @@ export component AppWindow inherits Window {
                 new-tab() => { root.new-tab-clicked(); }
             }
 
+            TopActionBar {
+                sidebar-visible: root.sidebar-visible;
+                bottom-panel-visible: root.bottom-panel-visible;
+                toggle-sidebar => { root.toggle-sidebar(); }
+                toggle-bottom-panel => { root.toggle-bottom-panel(); }
+                disconnect-active-tab => { root.disconnect-active-tab(); }
+                reconnect-active-tab => { root.reconnect-active-tab(); }
+                open-transfer-window => { root.open-transfer-window(); }
+            }
+
             // Content area swaps based on active tab kind.
             Rectangle {
                 vertical-stretch: 1;
@@ -268,6 +285,7 @@ export component AppWindow inherits Window {
                     send-key(key, ctrl, alt, shift) => { root.send-key(term.id, key, ctrl, alt, shift) }
                     terminal-resize(w, h) => { root.terminal-resize(term.id, w, h) }
                     sftp-navigate(path) => { root.sftp-navigate(term.id, path); }
+                    select-bottom-panel-tab(tab) => { root.select-bottom-panel-tab(tab); }
                     sftp-download(path) => { root.sftp-download(term.id, path); }
                     sftp-upload-clicked(dir) => { root.sftp-upload-clicked(term.id, dir); }
                     sftp-refresh(path) => { root.sftp-refresh(term.id, path); }

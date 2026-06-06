@@ -58,7 +58,7 @@ use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use tokio::runtime::Runtime;
 
-use crate::app_state::AppState;
+use crate::app_state::{AppState, BottomPanelTab};
 use crate::config::{AuthMethod, ConfigStore, Secret, Session};
 use crate::i18n::t;
 use crate::sftp::{spawn_sftp, SftpHandle};
@@ -146,12 +146,7 @@ pub fn run() -> Result<()> {
     window.set_lang_en(crate::i18n::is_en());
 
     let app_state = Rc::new(RefCell::new(AppState::default()));
-    {
-        let state = app_state.borrow();
-        window.set_sidebar_visible(state.sidebar_visible);
-        window.set_bottom_panel_visible(state.bottom_panel_visible);
-        window.set_bottom_panel_tab(state.bottom_panel_tab.as_str().into());
-    }
+    sync_app_state_to_window(&window, &app_state.borrow());
 
     let sessions_model: Rc<VecModel<SessionInfo>> = Rc::new(VecModel::default());
     window.set_sessions(ModelRc::from(sessions_model.clone()));
@@ -177,6 +172,16 @@ pub fn run() -> Result<()> {
     let local_net_hist: NetHist = Arc::new(Mutex::new(vec![0.0; NET_HISTORY_LEN]));
 
     // --- Wire callbacks --------------------------------------------------
+    wire_app_state_callbacks(
+        &window,
+        app_state.clone(),
+        tabs_model.clone(),
+        handles.clone(),
+        sftp_handles.clone(),
+        tab_statuses.clone(),
+        local_snap.clone(),
+        local_net_hist.clone(),
+    );
     wire_session_callbacks(
         &window,
         store.clone(),
@@ -481,6 +486,135 @@ fn center_window(win: &AppWindow) {
 
 #[cfg(not(windows))]
 fn center_window(_win: &AppWindow) {}
+
+fn sync_app_state_to_window(win: &AppWindow, state: &AppState) {
+    win.set_sidebar_visible(state.sidebar_visible);
+    win.set_bottom_panel_visible(state.bottom_panel_visible);
+    win.set_bottom_panel_tab(state.bottom_panel_tab.as_str().into());
+}
+
+fn wire_app_state_callbacks(
+    window: &AppWindow,
+    app_state: Rc<RefCell<AppState>>,
+    tabs_model: Rc<VecModel<TabInfo>>,
+    handles: Rc<RefCell<HashMap<String, SessionHandle>>>,
+    sftp_handles: SftpHandles,
+    tab_statuses: TabStatuses,
+    local_snap: LocalSnap,
+    local_net_hist: NetHist,
+) {
+    {
+        let weak = window.as_weak();
+        let app_state = app_state.clone();
+        window.on_toggle_sidebar(move || {
+            let Some(w) = weak.upgrade() else { return };
+            let mut state = app_state.borrow_mut();
+            state.toggle_sidebar();
+            sync_app_state_to_window(&w, &state);
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let app_state = app_state.clone();
+        window.on_toggle_bottom_panel(move || {
+            let Some(w) = weak.upgrade() else { return };
+            let mut state = app_state.borrow_mut();
+            state.toggle_bottom_panel();
+            sync_app_state_to_window(&w, &state);
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let app_state = app_state.clone();
+        window.on_select_bottom_panel_tab(move |tab: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let Some(tab) = BottomPanelTab::from_str(tab.as_str()) else {
+                return;
+            };
+            let mut state = app_state.borrow_mut();
+            state.select_bottom_panel_tab(tab);
+            sync_app_state_to_window(&w, &state);
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let tabs_model = tabs_model.clone();
+        let handles = handles.clone();
+        let sftp_handles = sftp_handles.clone();
+        let tab_statuses = tab_statuses.clone();
+        let local_snap = local_snap.clone();
+        let local_net_hist = local_net_hist.clone();
+        window.on_disconnect_active_tab(move || {
+            let Some(w) = weak.upgrade() else { return };
+            let active = w.get_active_tab_id().to_string();
+            if active == "welcome" {
+                return;
+            }
+
+            if let Some(handle) = handles.borrow_mut().remove(&active) {
+                handle.close();
+            }
+            if let Some(sftp) = sftp_handles.lock().unwrap().remove(&active) {
+                sftp.close();
+            }
+            if let Some(st) = tab_statuses.lock().unwrap().get_mut(&active) {
+                st.state = 2;
+            }
+            for i in 0..tabs_model.row_count() {
+                if let Some(mut row) = tabs_model.row_data(i) {
+                    if row.id.as_str() == active {
+                        row.connected = false;
+                        tabs_model.set_row_data(i, row);
+                        break;
+                    }
+                }
+            }
+            set_terminal_row(&w, &active, |row| {
+                row.status = t("已断开", "Disconnected").into();
+            });
+            refresh_sidebar(&w, &tab_statuses, &local_snap, &local_net_hist);
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        window.on_reconnect_active_tab(move || {
+            let Some(w) = weak.upgrade() else { return };
+            let active = w.get_active_tab_id().to_string();
+            if active == "welcome" {
+                w.set_ssh_import_hint(
+                    t("重连将在阶段 3 实现", "Reconnect is planned for phase 3").into(),
+                );
+                return;
+            }
+            set_terminal_row(&w, &active, |row| {
+                row.status = t("重连将在阶段 3 实现", "Reconnect is planned for phase 3").into();
+            });
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        window.on_open_transfer_window(move || {
+            let Some(w) = weak.upgrade() else { return };
+            let active = w.get_active_tab_id().to_string();
+            if active == "welcome" {
+                w.set_ssh_import_hint(t("请先连接一个会话", "Connect a session first").into());
+                return;
+            }
+            set_terminal_row(&w, &active, |row| {
+                row.status = t(
+                    "文件传输窗口将在阶段 7 实现",
+                    "Transfer window is planned for phase 7",
+                )
+                .into();
+            });
+        });
+    }
+}
 
 /// The active terminal tab's current SFTP directory ("" if unknown).
 fn active_sftp_path(win: &AppWindow, tab_id: &str) -> String {

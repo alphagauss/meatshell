@@ -1,0 +1,100 @@
+import { Theme } from "theme.slint";
+import { SftpPanel, SftpEntry, SftpTreeNode } from "sftp_panel.slint";
+import { TunnelPanel } from "tunnel_panel.slint";
+
+component PanelTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+
+    height: 28px;
+    min-width: 72px;
+    border-radius: Theme.radius-sm;
+    background: active ? Theme.bg-active : (touch.has-hover ? Theme.bg-hover : transparent);
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.label;
+        color: root.active ? Theme.text-primary : Theme.text-secondary;
+        font-size: Theme.fs-sm;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component BottomPanel inherits Rectangle {
+    in property <string> active-tab: "files";
+    in property <string> current-path: "/";
+    in property <[SftpEntry]> entries;
+    in property <string> status: "";
+    in property <bool> loading: false;
+    in property <[SftpTreeNode]> tree-nodes: [];
+
+    callback select-tab(string);
+    callback navigate(string);
+    callback download(string);
+    callback upload-clicked(string);
+    callback refresh(string);
+    callback tree-expand(string);
+    callback delete(string);
+    callback view(string);
+    callback edit(string);
+
+    background: Theme.bg-panel;
+
+    VerticalLayout {
+        spacing: 0;
+
+        Rectangle {
+            height: 34px;
+            background: Theme.bg-panel-alt;
+
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                padding-top: 3px;
+                padding-bottom: 3px;
+                spacing: 4px;
+
+                PanelTab {
+                    label: @tr("Files");
+                    active: root.active-tab == "files";
+                    clicked => { root.select-tab("files"); }
+                }
+
+                PanelTab {
+                    label: @tr("Tunnels");
+                    active: root.active-tab == "tunnels";
+                    clicked => { root.select-tab("tunnels"); }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+
+        if root.active-tab == "files" : SftpPanel {
+            vertical-stretch: 1;
+            current-path: root.current-path;
+            entries: root.entries;
+            status: root.status;
+            loading: root.loading;
+            tree-nodes: root.tree-nodes;
+            navigate(path) => { root.navigate(path); }
+            download(path) => { root.download(path); }
+            upload-clicked(dir) => { root.upload-clicked(dir); }
+            refresh(path) => { root.refresh(path); }
+            tree-expand(path) => { root.tree-expand(path); }
+            delete(path) => { root.delete(path); }
+            view(path) => { root.view(path); }
+            edit(path) => { root.edit(path); }
+        }
+
+        if root.active-tab == "tunnels" : TunnelPanel {
+            vertical-stretch: 1;
+        }
+    }
+}
