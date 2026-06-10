@@ -19,6 +19,7 @@ import { TerminalView, TermSpan, TermMatch } from "terminal_view.slint";
 import { TransferWindow } from "transfer_window.slint";
 import { SftpEntry, SftpTreeNode } from "sftp_panel.slint";
 import { TunnelRuleInfo } from "tunnel_panel.slint";
+import { ComboBox, SpinBox } from "std-widgets.slint";
 
 export { SessionInfo, SessionDraft, TabInfo, SftpEntry, SftpTreeNode, TunnelRuleInfo, TransferWindow }
 
@@ -102,12 +103,19 @@ export component AppWindow inherits Window {
     in property <[TransferInfo]> transfers; // download/upload records (newest first)
     in property <[string]> about-libs;      // open-source libraries used
     in-out property <bool> lang-en: false;  // current UI language (false = 中文)
+    in-out property <bool> dark-mode <=> Theme.dark;
+    in-out property <string> term-font-family <=> Theme.term-font-family;
+    in-out property <length> term-font-size <=> Theme.term-font-size;
+    in property <[string]> term-fonts;
     in-out property <string> terminal-engine-mode: "alacritty";
     in-out property <length> sftp-panel-height: 220px; // shared; lets Rust locate the drop zone
     callback pick-download-dir();            // open a folder picker
     callback open-download-dir();            // reveal the folder in the OS
     callback clear-transfers();              // wipe the transfer history
     callback set-language(string);           // switch UI language ("zh" / "en")
+    callback set-term-font(string);
+    callback set-term-font-size(int);
+    callback toggle-theme();
     callback set-terminal-engine-mode(string);
 
     // --- Session list ------------------------------------------------------
@@ -330,7 +338,7 @@ export component AppWindow inherits Window {
         }
     }
 
-    // --- Top-right buttons: [下载] [设置] (设置 on the far right) ----------
+    // --- Top-right buttons: [主题] [下载] [设置] (设置 on the far right) ----
     // Settings (gear) — far right.
     Rectangle {
         x: root.width - 34px;
@@ -353,6 +361,27 @@ export component AppWindow inherits Window {
             text: "\u{E8B8}";              // Material Icons settings (gear)
             font-family: "Material Icons";
             color: Theme.text-secondary;
+            font-size: Theme.fs-md;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    // Theme toggle — left of download.
+    Rectangle {
+        x: root.width - 94px;
+        y: 8px;
+        width: 26px;
+        height: 26px;
+        border-radius: Theme.radius-sm;
+        background: theme-ta.has-hover ? Theme.bg-hover : transparent;
+        theme-ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.toggle-theme(); }
+        }
+        Text {
+            text: Theme.dark ? "\u{E518}" : "\u{E51C}";
+            font-family: "Material Icons";
+            color: Theme.dark ? #f5c542 : #5856d6;
             font-size: Theme.fs-md;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -569,10 +598,10 @@ export component AppWindow inherits Window {
 
     // --- Settings menu popup (top-right) ----------------------------------
     Rectangle {
-        x: parent.width - 196px;
+        x: parent.width - 260px;
         y: 40px;
-        width: 198px;
-        height: 156px;
+        width: 252px;
+        height: 258px;
         visible: root.settings-open;
         background: Theme.bg-panel;
         border-radius: Theme.radius-md;
@@ -656,6 +685,40 @@ export component AppWindow inherits Window {
                         font-size: Theme.fs-xs;
                         vertical-alignment: center;
                     }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.border-subtle; }
+            Text {
+                text: root.lang-en ? "Terminal font" : "终端字体";
+                color: Theme.text-secondary;
+                font-size: Theme.fs-xs;
+            }
+            ComboBox {
+                height: 28px;
+                model: root.term-fonts;
+                current-value: root.term-font-family;
+                selected(v) => { root.set-term-font(v); }
+            }
+            HorizontalLayout {
+                height: 28px;
+                spacing: 8px;
+                Text {
+                    text: root.lang-en ? "Font size" : "字号";
+                    color: Theme.text-primary;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+                SpinBox {
+                    minimum: 8;
+                    maximum: 32;
+                    value: root.term-font-size / 1px;
+                    edited(v) => { root.set-term-font-size(v); }
+                }
+                Text {
+                    text: (root.term-font-size / 1px) + " px";
+                    color: Theme.text-muted;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
                 }
             }
             Rectangle {

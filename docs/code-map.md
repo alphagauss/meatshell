@@ -530,6 +530,7 @@
 - 定义 Rust 侧需要的全部回调和模型字段
 - 组装左侧栏、Tab 栏、顶部工具栏、欢迎页、终端页、底部面板、会话对话框
 - 右上角 settings popup 继续承载导入 `~/.ssh/config`、语言切换、终端引擎默认值切换和 About 入口
+- settings popup 还承载终端字体和字号选择；主题暗/亮状态通过 `dark-mode` 绑定到 `Theme.dark`
 - 暴露 `sidebar-visible`、`bottom-panel-visible`、`bottom-panel-tab` 布局状态给 Rust 侧 `AppState`
 - 暴露当前 active session 的 `tunnel-rules` 模型和隧道规则增删改/启用回调给 Rust
 
@@ -547,6 +548,13 @@
 - `open-transfer-window`
 - `terminal-engine-mode`
 - `set-terminal-engine-mode`
+- `dark-mode`
+- `term-font-family`
+- `term-font-size`
+- `term-fonts`
+- `set-term-font`
+- `set-term-font-size`
+- `toggle-theme`
 - `tunnel-add-rule`
 - `tunnel-update-rule`
 - `tunnel-toggle-rule`
@@ -563,6 +571,7 @@
 ### `ui/terminal_view.slint`
 职责：
 - 终端格子渲染
+- 终端 cell 测量和文本渲染使用 `Theme.term-font-family` / `Theme.term-font-size`
 - 隐藏 IME 输入
 - 搜索高亮、拖拽选区、右键菜单、滚轮滚动
 - 当终端引擎报告 SGR mouse mode 已开启时，把左键按下/释放和滚轮转发给 Rust，避免普通文本选择退化
@@ -701,9 +710,13 @@
 ### `ui/theme.slint`
 职责：
 - 颜色、字号、圆角、间距等设计 token；`text-secondary` / `text-muted` 控制弱文字对比度
+- `Theme.dark` 控制暗/亮色调，`Theme.term-font-family` / `Theme.term-font-size` 控制终端字体和 cell 尺寸
 
 关键符号：
 - `Theme`
+- `dark`
+- `term-font-family`
+- `term-font-size`
 - `text-secondary`
 - `text-muted`
 
