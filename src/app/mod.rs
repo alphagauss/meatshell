@@ -101,7 +101,8 @@ pub fn run() -> Result<()> {
     // Apply the saved UI language.  The Rust-side flag drives `i18n::t(...)`;
     // `apply_to_slint` selects the bundled `.po` for the static `@tr(...)` text
     // (must run after the first component exists, which it now does).
-    crate::i18n::set_language(store.borrow().language());
+    let startup_language = crate::i18n::normalize_language(store.borrow().language());
+    crate::i18n::set_language(startup_language);
     crate::i18n::apply_to_slint();
     window.set_lang_en(crate::i18n::is_en());
 

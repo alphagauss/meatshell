@@ -21,12 +21,23 @@ const EN: u8 = 1;
 
 static LANG: AtomicU8 = AtomicU8::new(ZH);
 
+pub fn normalize_language(code: &str) -> &'static str {
+    let lower = code.to_ascii_lowercase();
+    if lower.starts_with("en") {
+        "en"
+    } else if lower.starts_with("zh") {
+        "zh"
+    } else {
+        "zh"
+    }
+}
+
 /// Apply a language code (`"zh"` or `"en"`).  Updates the Rust-side flag and
 /// Slint's bundled-translation selection.  Safe to call before the first
 /// component exists for the flag; the Slint selection is a no-op error then and
 /// should be re-applied once the window is created.
 pub fn set_language(code: &str) {
-    let en = code.eq_ignore_ascii_case("en");
+    let en = normalize_language(code) == "en";
     LANG.store(if en { EN } else { ZH }, Ordering::Relaxed);
     apply_to_slint();
 }
@@ -60,5 +71,24 @@ pub fn t(zh: &'static str, en: &'static str) -> &'static str {
         en
     } else {
         zh
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_language;
+
+    #[test]
+    fn normalizes_supported_language_families() {
+        assert_eq!(normalize_language("en"), "en");
+        assert_eq!(normalize_language("en-US"), "en");
+        assert_eq!(normalize_language("zh"), "zh");
+        assert_eq!(normalize_language("zh-CN"), "zh");
+    }
+
+    #[test]
+    fn normalizes_unsupported_language_to_zh() {
+        assert_eq!(normalize_language("ja"), "zh");
+        assert_eq!(normalize_language(""), "zh");
     }
 }

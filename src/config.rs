@@ -179,7 +179,8 @@ impl ConfigStore {
                 .with_context(|| format!("failed to create config dir {}", parent.display()))?;
         }
 
-        let cache = if path.exists() {
+        let existed = path.exists();
+        let mut cache = if existed {
             let raw = fs::read_to_string(&path)
                 .with_context(|| format!("failed to read {}", path.display()))?;
             match serde_json::from_str::<ConfigFile>(&raw) {
@@ -198,7 +199,18 @@ impl ConfigStore {
             ConfigFile::default()
         };
 
-        Ok(Self { path, cache })
+        let normalized_language = crate::i18n::normalize_language(&cache.language).to_string();
+        let language_changed = cache.language != normalized_language;
+        cache.language = normalized_language;
+
+        let store = Self { path, cache };
+        if existed && language_changed {
+            if let Err(err) = store.save() {
+                tracing::warn!("failed to save normalized language config: {err:#}");
+            }
+        }
+
+        Ok(store)
     }
 
     fn config_path() -> Result<PathBuf> {
@@ -241,16 +253,12 @@ impl ConfigStore {
     }
 
     /// UI language code ("zh" default / "en").
-    pub fn language(&self) -> &str {
-        if self.cache.language.is_empty() {
-            "zh"
-        } else {
-            &self.cache.language
-        }
+    pub fn language(&self) -> &'static str {
+        crate::i18n::normalize_language(&self.cache.language)
     }
 
     pub fn set_language(&mut self, lang: String) {
-        self.cache.language = lang;
+        self.cache.language = crate::i18n::normalize_language(&lang).to_string();
     }
 
     /// Theme preference: "system" (default) | "dark" | "light".
@@ -396,6 +404,24 @@ mod tests {
         assert_eq!(cfg.font_family, "");
         assert_eq!(cfg.font_size, 0);
         assert_eq!(cfg.sessions[0].group, "");
+    }
+
+    #[test]
+    fn language_values_are_normalized() {
+        let mut store = ConfigStore {
+            path: PathBuf::new(),
+            cache: ConfigFile {
+                language: "ja".into(),
+                ..ConfigFile::default()
+            },
+        };
+        assert_eq!(store.language(), "zh");
+
+        store.set_language("en-US".into());
+        assert_eq!(store.cache.language, "en");
+
+        store.set_language("ja".into());
+        assert_eq!(store.cache.language, "zh");
     }
 
     #[test]
