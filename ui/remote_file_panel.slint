@@ -2,15 +2,41 @@ import { Theme } from "theme.slint";
 import { ScrollView } from "std-widgets.slint";
 import { SftpEntry } from "sftp_panel.slint";
 
+component FileMenuItem inherits Rectangle {
+    in property <string> label;
+    callback clicked();
+    height: 26px;
+    border-radius: Theme.radius-sm;
+    background: ta.has-hover ? Theme.bg-hover : transparent;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    Text {
+        x: 10px;
+        text: root.label;
+        color: Theme.text-primary;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+        height: parent.height;
+    }
+}
+
 export component RemoteFilePanel inherits Rectangle {
     in property <string> current-path;
     in property <[SftpEntry]> entries;
     in property <string> status;
     in property <bool> loading;
+    property <bool> rename-open;
+    property <string> rename-path;
+    property <string> rename-name;
 
     callback navigate(string);
     callback refresh();
     callback download(string);
+    callback open(string);
+    callback edit(string);
+    callback rename(string, string);
 
     background: Theme.bg-panel;
 
@@ -108,9 +134,11 @@ export component RemoteFilePanel inherits Rectangle {
                         vertical-alignment: center;
                     }
                 }
-                for entry[i] in root.entries : Rectangle {
+                for entry[i] in root.entries : row := Rectangle {
                     height: 26px;
                     background: row-ta.has-hover ? #4a90e225 : (mod(i, 2) == 0 ? transparent : #ffffff08);
+                    property <length> mx;
+                    property <length> my;
                     row-ta := TouchArea {
                         mouse-cursor: pointer;
                         double-clicked => {
@@ -118,6 +146,51 @@ export component RemoteFilePanel inherits Rectangle {
                                 root.navigate(entry.full-path);
                             } else {
                                 root.download(entry.full-path);
+                            }
+                        }
+                        pointer-event(ev) => {
+                            if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) {
+                                row.mx = self.mouse-x;
+                                row.my = self.mouse-y;
+                                row-menu.show();
+                            }
+                        }
+                    }
+                    row-menu := PopupWindow {
+                        x: row.mx;
+                        y: row.my;
+                        width: 112px;
+                        height: (entry.is-dir ? 1 : 4) * 27px + 8px;
+                        Rectangle {
+                            background: Theme.bg-panel;
+                            border-radius: Theme.radius-sm;
+                            border-width: 1px;
+                            border-color: Theme.border-strong;
+                            drop-shadow-blur: 12px;
+                            drop-shadow-color: #00000060;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 1px;
+                                if !entry.is-dir : FileMenuItem {
+                                    label: @tr("Transfer");
+                                    clicked => { root.download(entry.full-path); }
+                                }
+                                if !entry.is-dir : FileMenuItem {
+                                    label: @tr("Open");
+                                    clicked => { root.open(entry.full-path); }
+                                }
+                                if !entry.is-dir : FileMenuItem {
+                                    label: @tr("Edit");
+                                    clicked => { root.edit(entry.full-path); }
+                                }
+                                FileMenuItem {
+                                    label: @tr("Rename");
+                                    clicked => {
+                                        root.rename-path = entry.full-path;
+                                        root.rename-name = entry.name;
+                                        root.rename-open = true;
+                                    }
+                                }
                             }
                         }
                     }
@@ -187,6 +260,76 @@ export component RemoteFilePanel inherits Rectangle {
                 font-size: Theme.fs-xs;
                 overflow: elide;
                 vertical-alignment: center;
+            }
+        }
+    }
+
+    if root.rename-open : Rectangle {
+        width: root.width > 296px ? 280px : root.width - 16px;
+        height: 92px;
+        x: (root.width - self.width) / 2;
+        y: 52px;
+        border-radius: Theme.radius-md;
+        border-width: 1px;
+        border-color: Theme.border-strong;
+        background: Theme.bg-panel;
+        drop-shadow-blur: 14px;
+        drop-shadow-color: #00000070;
+
+        VerticalLayout {
+            padding: 10px;
+            spacing: 8px;
+            Text {
+                text: @tr("Rename");
+                color: Theme.text-primary;
+                font-size: Theme.fs-sm;
+                font-weight: 600;
+            }
+            Rectangle {
+                height: 28px;
+                border-radius: Theme.radius-sm;
+                border-width: 1px;
+                border-color: Theme.border-subtle;
+                background: Theme.bg-root;
+                TextInput {
+                    x: 8px;
+                    width: parent.width - 16px;
+                    height: parent.height;
+                    text <=> root.rename-name;
+                    color: Theme.text-primary;
+                    font-size: Theme.fs-sm;
+                    single-line: true;
+                    vertical-alignment: center;
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+                Rectangle {
+                    width: 60px;
+                    height: 24px;
+                    border-radius: Theme.radius-sm;
+                    background: cancel-ta.has-hover ? Theme.bg-hover : Theme.bg-elevated;
+                    cancel-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.rename-open = false; }
+                    }
+                    Text { text: @tr("Cancel"); color: Theme.text-primary; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle {
+                    width: 60px;
+                    height: 24px;
+                    border-radius: Theme.radius-sm;
+                    background: ok-ta.has-hover ? Theme.accent-hover : Theme.accent;
+                    ok-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.rename(root.rename-path, root.rename-name);
+                            root.rename-open = false;
+                        }
+                    }
+                    Text { text: @tr("OK"); color: white; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
+                }
             }
         }
     }

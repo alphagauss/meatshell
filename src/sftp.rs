@@ -49,6 +49,8 @@ pub enum SftpCommand {
     Upload { local: String, remote_dir: String },
     /// Delete a remote file (falls back to removing an empty directory).
     Delete(String),
+    /// Rename a remote file or directory.
+    Rename { old_path: String, new_path: String },
     /// Download a file to a temp dir and open it with the OS default app.
     /// When `edit` is set, watch the temp copy and re-upload on every change.
     OpenTemp { remote: String, edit: bool },
@@ -82,6 +84,11 @@ impl SftpHandle {
     }
     pub fn delete(&self, path: String) {
         let _ = self.commands.send(SftpCommand::Delete(path));
+    }
+    pub fn rename(&self, old_path: String, new_path: String) {
+        let _ = self
+            .commands
+            .send(SftpCommand::Rename { old_path, new_path });
     }
     pub fn open_temp(&self, remote: String, edit: bool) {
         let _ = self.commands.send(SftpCommand::OpenTemp { remote, edit });
@@ -531,6 +538,37 @@ async fn run_sftp(
                         let _ = events.send(SessionEvent::SftpStatus(format!(
                             "{}: {e}",
                             t("删除失败", "Delete failed")
+                        )));
+                    }
+                }
+            }
+
+            SftpCommand::Rename { old_path, new_path } => {
+                let filename = base_name(&old_path);
+                let _ = events.send(SessionEvent::SftpStatus(format!(
+                    "{} {}...",
+                    t("重命名", "Renaming"),
+                    filename
+                )));
+                match sftp.rename(&old_path, &new_path).await {
+                    Ok(_) => {
+                        let parent = parent_dir(&new_path);
+                        if let Ok(entries) = list_dir_impl(&sftp, &parent).await {
+                            let _ = events.send(SessionEvent::SftpEntries {
+                                path: parent.clone(),
+                                entries,
+                            });
+                        }
+                        let _ = events.send(SessionEvent::SftpStatus(format!(
+                            "{}: {}",
+                            t("已重命名", "Renamed"),
+                            base_name(&new_path)
+                        )));
+                    }
+                    Err(e) => {
+                        let _ = events.send(SessionEvent::SftpStatus(format!(
+                            "{}: {e}",
+                            t("重命名失败", "Rename failed")
                         )));
                     }
                 }

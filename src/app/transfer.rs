@@ -7,7 +7,10 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::config::{ConfigStore, Session};
-use crate::file_transfer::{default_local_dir, list_local_dir, resolve_local_path, LocalFileEntry};
+use crate::file_transfer::{
+    default_local_dir, edit_local_path, list_local_dir, open_local_path, rename_local_path,
+    resolve_local_path, LocalFileEntry,
+};
 use crate::i18n::t;
 use crate::sftp::{spawn_sftp, SftpHandle};
 use crate::ssh::{format_mtime, format_size, RemoteEntry, SessionEvent};
@@ -188,6 +191,19 @@ fn active_transfer_sftp(
         .map(|tab| tab.sftp.clone())
 }
 
+fn renamed_remote_path(old_path: &str, new_name: &str) -> Option<String> {
+    let name = new_name.trim();
+    if name.is_empty() || name.contains('/') || name.contains('\\') {
+        return None;
+    }
+    let parent = parent_path(old_path);
+    if parent == "/" {
+        Some(format!("/{name}"))
+    } else {
+        Some(format!("{}/{}", parent.trim_end_matches('/'), name))
+    }
+}
+
 fn show_transfer_tab(
     window: &TransferWindow,
     remote_tabs: &Rc<std::cell::RefCell<Vec<TransferRemoteTab>>>,
@@ -349,6 +365,46 @@ pub(super) fn wire_transfer_window_callbacks(
     }
     {
         let weak = window.as_weak();
+        window.on_local_open(move |path: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            match open_local_path(path.as_str()) {
+                Ok(()) => w.set_local_status(t("已打开", "Opened").into()),
+                Err(err) => {
+                    w.set_local_status(format!("{}: {err:#}", t("打开失败", "Open failed")).into())
+                }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_local_edit(move |path: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            match edit_local_path(path.as_str()) {
+                Ok(()) => w.set_local_status(t("已打开编辑", "Opened for editing").into()),
+                Err(err) => {
+                    w.set_local_status(format!("{}: {err:#}", t("打开失败", "Open failed")).into())
+                }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_local_rename(move |path: SharedString, new_name: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            match rename_local_path(path.as_str(), new_name.as_str()) {
+                Ok(()) => {
+                    let current = w.get_local_path().to_string();
+                    refresh_transfer_local(&w, current);
+                    w.set_local_status(t("已重命名", "Renamed").into());
+                }
+                Err(err) => w.set_local_status(
+                    format!("{}: {err:#}", t("重命名失败", "Rename failed")).into(),
+                ),
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
         let remote_tabs = remote_tabs.clone();
         window.on_upload_local(move |local: SharedString| {
             let Some(w) = weak.upgrade() else { return };
@@ -407,6 +463,51 @@ pub(super) fn wire_transfer_window_callbacks(
             let local_dir = w.get_local_path().to_string();
             w.set_remote_status(format!("{} {}", t("下载", "Downloading"), remote.as_str()).into());
             sftp.download(remote.to_string(), local_dir);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let remote_tabs = remote_tabs.clone();
+        window.on_remote_open(move |remote: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let Some(sftp) = active_transfer_sftp(&w, &remote_tabs) else {
+                return;
+            };
+            w.set_remote_status(format!("{} {}", t("打开", "Opening"), remote.as_str()).into());
+            sftp.open_temp(remote.to_string(), false);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let remote_tabs = remote_tabs.clone();
+        window.on_remote_edit(move |remote: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let Some(sftp) = active_transfer_sftp(&w, &remote_tabs) else {
+                return;
+            };
+            w.set_remote_status(format!("{} {}", t("编辑", "Editing"), remote.as_str()).into());
+            sftp.open_temp(remote.to_string(), true);
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let remote_tabs = remote_tabs.clone();
+        window.on_remote_rename(move |old_path: SharedString, new_name: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let Some(sftp) = active_transfer_sftp(&w, &remote_tabs) else {
+                return;
+            };
+            let Some(new_path) = renamed_remote_path(old_path.as_str(), new_name.as_str()) else {
+                w.set_remote_status(
+                    t("重命名失败: 文件名无效", "Rename failed: invalid file name").into(),
+                );
+                return;
+            };
+            w.set_remote_loading(true);
+            w.set_remote_status(
+                format!("{} {}", t("重命名", "Renaming"), old_path.as_str()).into(),
+            );
+            sftp.rename(old_path.to_string(), new_path);
         });
     }
     {

@@ -64,3 +64,97 @@ pub fn list_local_dir(path: impl AsRef<Path>) -> Result<(String, Vec<LocalFileEn
     });
     Ok((display_path, entries))
 }
+
+pub fn open_local_path(path: &str) -> Result<()> {
+    open_with_os(path)
+}
+
+pub fn edit_local_path(path: &str) -> Result<()> {
+    #[cfg(windows)]
+    {
+        std::process::Command::new("notepad.exe")
+            .arg(path)
+            .spawn()
+            .with_context(|| format!("open notepad for {path}"))?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        if let Some(editor) = std::env::var_os("VISUAL").or_else(|| std::env::var_os("EDITOR")) {
+            std::process::Command::new(editor)
+                .arg(path)
+                .spawn()
+                .with_context(|| format!("open editor for {path}"))?;
+            Ok(())
+        } else {
+            open_with_os(path)
+        }
+    }
+}
+
+pub fn rename_local_path(path: &str, new_name: &str) -> Result<()> {
+    let name = clean_new_name(new_name)?;
+    let path = Path::new(path);
+    let parent = path
+        .parent()
+        .context("local path has no parent directory")?;
+    std::fs::rename(path, parent.join(name)).with_context(|| format!("rename {}", path.display()))
+}
+
+fn clean_new_name(new_name: &str) -> Result<&str> {
+    let name = new_name.trim();
+    if name.is_empty() || name.contains('/') || name.contains('\\') {
+        anyhow::bail!("invalid file name");
+    }
+    Ok(name)
+}
+
+#[cfg(windows)]
+fn open_with_os(path: &str) -> Result<()> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: isize,
+            lp_operation: *const u16,
+            lp_file: *const u16,
+            lp_parameters: *const u16,
+            lp_directory: *const u16,
+            n_show_cmd: i32,
+        ) -> isize;
+    }
+
+    let to_wide = |s: &str| -> Vec<u16> {
+        OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    };
+    let op = to_wide("open");
+    let file = to_wide(path);
+    let result = unsafe {
+        ShellExecuteW(
+            0,
+            op.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
+    };
+    if result <= 32 {
+        anyhow::bail!("open failed with ShellExecuteW code {result}");
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn open_with_os(path: &str) -> Result<()> {
+    std::process::Command::new("xdg-open")
+        .arg(path)
+        .spawn()
+        .with_context(|| format!("open {path}"))?;
+    Ok(())
+}

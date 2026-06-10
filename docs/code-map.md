@@ -216,6 +216,7 @@
 - 文件传输窗口右侧远程区按 SSH session 建 tab；同一 session 复用并激活已有 tab，不同 session 追加 tab，SFTP 事件只更新当前 active remote tab
 - 文件传输窗口远程 tab 双击会替换该 tab 的 SFTP worker，并按该 tab 当前远程路径重新加载
 - 文件传输窗口底部显示与主窗口下载 popup 共享的 `TransferInfo` 记录模型，清空动作复用同一个 `VecModel`；传输进度记录不受 active remote tab 过滤影响
+- 文件传输窗口本地/远程文件列表右键菜单由这里接线；本地 open/edit/rename 调 `src/file_transfer.rs`，远程 open/edit/rename 调当前 active remote tab 的 `SftpHandle`
 
 关键符号：
 - `open_transfer_window(...)`
@@ -297,13 +298,16 @@
 职责：
 - 独立文件传输窗口的本地文件系统 helper
 - 用 `std::fs::read_dir` 列本地目录，并排序为目录优先
-- 解析本地上级目录和默认本地目录；远程传输仍由 `src/sftp.rs` 负责
+- 解析本地上级目录和默认本地目录；本地 open/edit/rename 也放在这里；远程传输仍由 `src/sftp.rs` 负责
 
 关键符号：
 - `LocalFileEntry`
 - `default_local_dir(...)`
 - `resolve_local_path(...)`
 - `list_local_dir(...)`
+- `open_local_path(...)`
+- `edit_local_path(...)`
+- `rename_local_path(...)`
 
 ### `src/tunnel.rs`
 职责：
@@ -430,7 +434,7 @@
 ### `src/sftp.rs`
 职责：
 - 独立的 SFTP 工作线程
-- 远端目录树、目录列表、下载、上传、删除、临时打开、编辑后自动重传
+- 远端目录树、目录列表、下载、上传、删除、重命名、临时打开、编辑后自动重传
 - 可选沿用 SSH 会话的同一套出站代理
 
 关键符号：
@@ -670,7 +674,7 @@
 - 左侧承载 `LocalFilePanel`，右侧承载 `RemoteFilePanel`
 - 右侧远程区顶部显示 remote tab 条，并暴露选择/关闭/双击重连回调给 Rust
 - 底部显示共享传输记录窗格，复用 `TransferInfo` 模型和清空回调
-- 暴露本地/远程导航、刷新、上传、下载、关闭回调给 `src/app/mod.rs`
+- 暴露本地/远程导航、刷新、上传/下载、打开、编辑、重命名、关闭回调给 `src/app/mod.rs`
 
 关键符号：
 - `TransferWindow`
@@ -687,6 +691,7 @@
 职责：
 - 文件传输窗口左侧本机目录列表
 - 支持进入目录、返回上级、刷新，以及上传本地文件到当前远程目录
+- 支持右键菜单：传输、打开、编辑、重命名；当前 step 只对普通文件显示传输/编辑
 
 关键符号：
 - `LocalFilePanel`
@@ -695,6 +700,7 @@
 职责：
 - 文件传输窗口右侧远程目录列表
 - 支持进入目录、返回上级、刷新，以及下载远程文件到当前本地目录
+- 支持右键菜单：传输、打开、编辑、重命名；当前 step 只对普通文件显示传输/打开/编辑
 
 关键符号：
 - `RemoteFilePanel`

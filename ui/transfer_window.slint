@@ -35,9 +35,15 @@ export component TransferWindow inherits Window {
     callback local-navigate(string);
     callback local-refresh();
     callback upload-local(string);
+    callback local-open(string);
+    callback local-edit(string);
+    callback local-rename(string, string);
     callback remote-navigate(string);
     callback remote-refresh();
     callback download-remote(string);
+    callback remote-open(string);
+    callback remote-edit(string);
+    callback remote-rename(string, string);
     callback remote-tab-selected(string);
     callback remote-tab-closed(string);
     callback remote-tab-reconnect(string);
@@ -97,6 +103,9 @@ export component TransferWindow inherits Window {
                 navigate(path) => { root.local-navigate(path); }
                 refresh() => { root.local-refresh(); }
                 upload(path) => { root.upload-local(path); }
+                open(path) => { root.local-open(path); }
+                edit(path) => { root.local-edit(path); }
+                rename(path, name) => { root.local-rename(path, name); }
             }
 
             Rectangle { width: 1px; background: Theme.border-strong; }
@@ -176,6 +185,9 @@ export component TransferWindow inherits Window {
                     navigate(path) => { root.remote-navigate(path); }
                     refresh() => { root.remote-refresh(); }
                     download(path) => { root.download-remote(path); }
+                    open(path) => { root.remote-open(path); }
+                    edit(path) => { root.remote-edit(path); }
+                    rename(path, name) => { root.remote-rename(path, name); }
                 }
             }
         }
