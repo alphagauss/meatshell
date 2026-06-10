@@ -433,7 +433,7 @@
 职责：
 - 会话配置落盘与读取
 - 凭据包装
-- 下载目录、UI 语言、默认终端引擎，以及每个 Session 的可选出站代理持久化；默认终端引擎缺省为 Alacritty
+- 下载目录、UI 语言、主题偏好、终端字体、默认终端引擎，以及每个 Session 的分组和可选出站代理持久化；默认终端引擎缺省为 Alacritty
 
 关键符号：
 - `Secret`
@@ -450,11 +450,18 @@
 - `ConfigStore::set_download_dir(...)`
 - `ConfigStore::language(...)`
 - `ConfigStore::set_language(...)`
+- `ConfigStore::theme_pref(...)`
+- `ConfigStore::set_theme_pref(...)`
+- `ConfigStore::font_family(...)`
+- `ConfigStore::set_font_family(...)`
+- `ConfigStore::font_size(...)`
+- `ConfigStore::set_font_size(...)`
 - `ConfigStore::terminal_engine_mode(...)`
 - `ConfigStore::set_terminal_engine_mode(...)`
 
 定位提示：
 - 任何 session 字段新增 / 删除，先看这里，再看 `ui/session_dialog.slint`、`ui/welcome.slint` 和 `src/proxy.rs`
+- 主题 / 终端字体配置入口先看这里，再看 `src/app/mod.rs`、`ui/app.slint` 和 `ui/terminal_view.slint`
 - `Secret` 的 zeroize 行为不要轻易改
 
 ### `src/system.rs`

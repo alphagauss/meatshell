@@ -107,6 +107,10 @@ pub struct Session {
     /// "http://user:pass@host:8080". Empty = use $ALL_PROXY, else direct.
     #[serde(default)]
     pub proxy: String,
+    /// Optional folder/group name to organize sessions in the list.
+    /// Empty = ungrouped. Sessions are grouped by this in Quick Connect.
+    #[serde(default)]
+    pub group: String,
     #[serde(default)]
     pub last_used: Option<String>,
 }
@@ -123,6 +127,7 @@ impl Session {
             password: Secret::default(),
             private_key_path: String::new(),
             proxy: String::new(),
+            group: String::new(),
             last_used: None,
         }
     }
@@ -139,6 +144,15 @@ pub struct ConfigFile {
     /// UI language code: "zh" (default) or "en".
     #[serde(default)]
     pub language: String,
+    /// Theme preference: "system" (default) | "dark" | "light".
+    #[serde(default)]
+    pub theme_pref: String,
+    /// Terminal font family. Empty = the built-in default (Cascadia Mono).
+    #[serde(default)]
+    pub font_family: String,
+    /// Terminal font size in px. 0 = the built-in default.
+    #[serde(default)]
+    pub font_size: u32,
     #[serde(default)]
     pub terminal_engine: Option<String>,
 }
@@ -233,6 +247,41 @@ impl ConfigStore {
         self.cache.language = lang;
     }
 
+    /// Theme preference: "system" (default) | "dark" | "light".
+    pub fn theme_pref(&self) -> &str {
+        if self.cache.theme_pref.is_empty() {
+            "system"
+        } else {
+            &self.cache.theme_pref
+        }
+    }
+
+    pub fn set_theme_pref(&mut self, pref: String) {
+        self.cache.theme_pref = pref;
+    }
+
+    /// Terminal font family ("" = built-in default).
+    pub fn font_family(&self) -> &str {
+        &self.cache.font_family
+    }
+
+    pub fn set_font_family(&mut self, family: String) {
+        self.cache.font_family = family;
+    }
+
+    /// Terminal font size in px (falls back to 13 when unset).
+    pub fn font_size(&self) -> u32 {
+        if self.cache.font_size == 0 {
+            13
+        } else {
+            self.cache.font_size
+        }
+    }
+
+    pub fn set_font_size(&mut self, size: u32) {
+        self.cache.font_size = size.clamp(8, 32);
+    }
+
     pub fn terminal_engine_mode(&self) -> TerminalEngineMode {
         self.cache
             .terminal_engine
@@ -280,5 +329,24 @@ mod tests {
             },
         };
         assert_eq!(store.terminal_engine_mode(), TerminalEngineMode::Legacy);
+    }
+
+    #[test]
+    fn legacy_config_defaults_new_fields() {
+        let raw = r#"{
+            "sessions": [{
+                "id": "1",
+                "name": "prod",
+                "host": "example.com",
+                "port": 22,
+                "user": "root",
+                "auth": "password"
+            }]
+        }"#;
+        let cfg: ConfigFile = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.theme_pref, "");
+        assert_eq!(cfg.font_family, "");
+        assert_eq!(cfg.font_size, 0);
+        assert_eq!(cfg.sessions[0].group, "");
     }
 }

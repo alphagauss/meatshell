@@ -122,6 +122,7 @@ pub(super) fn wire_session_callbacks(
                         password: Secret::default(),
                         private_key_path: h.identity_file,
                         proxy: String::new(),
+                        group: String::new(),
                         last_used: None,
                     });
                     added += 1;
@@ -204,6 +205,11 @@ pub(super) fn wire_session_callbacks(
             } else {
                 Secret::new(draft.password.to_string())
             };
+            let group = store
+                .borrow()
+                .get(&id)
+                .map(|s| s.group.clone())
+                .unwrap_or_default();
             let new_session = Session {
                 id,
                 name: if draft.name.is_empty() {
@@ -222,6 +228,7 @@ pub(super) fn wire_session_callbacks(
                 password,
                 private_key_path: draft.private_key_path.to_string().replace('\\', "/"),
                 proxy: draft.proxy.to_string(),
+                group,
                 last_used: None,
             };
             {
