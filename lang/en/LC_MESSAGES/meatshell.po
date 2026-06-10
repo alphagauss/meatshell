@@ -191,3 +191,12 @@ msgstr "Proxy (optional)"
 
 msgid "Leave blank to use $ALL_PROXY or connect directly"
 msgstr "Leave blank to use $ALL_PROXY or connect directly"
+
+msgid "Type"
+msgstr "Type"
+
+msgid "Attributes"
+msgstr "Attributes"
+
+msgid "Owner"
+msgstr "Owner"

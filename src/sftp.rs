@@ -820,6 +820,9 @@ async fn list_dir_impl(sftp: &SftpSession, path: &str) -> Result<Vec<RemoteEntry
                 name,
                 full_path,
                 is_dir,
+                file_type: remote_file_type(is_dir),
+                permissions: format_unix_mode(meta.permissions, is_dir),
+                owner: format_remote_owner(meta.uid, meta.gid),
                 size,
                 modified,
             }
@@ -834,6 +837,39 @@ async fn list_dir_impl(sftp: &SftpSession, path: &str) -> Result<Vec<RemoteEntry
     });
 
     Ok(entries)
+}
+
+fn remote_file_type(is_dir: bool) -> String {
+    if is_dir {
+        t("文件夹", "Folder").to_string()
+    } else {
+        t("文件", "File").to_string()
+    }
+}
+
+fn format_unix_mode(mode: Option<u32>, is_dir: bool) -> String {
+    let Some(mode) = mode else {
+        return String::new();
+    };
+
+    let mut formatted = String::with_capacity(10);
+    formatted.push(if is_dir { 'd' } else { '-' });
+    for shift in [6, 3, 0] {
+        let bits = (mode >> shift) & 0o7;
+        formatted.push(if bits & 0o4 != 0 { 'r' } else { '-' });
+        formatted.push(if bits & 0o2 != 0 { 'w' } else { '-' });
+        formatted.push(if bits & 0o1 != 0 { 'x' } else { '-' });
+    }
+    formatted
+}
+
+fn format_remote_owner(uid: Option<u32>, gid: Option<u32>) -> String {
+    match (uid, gid) {
+        (Some(uid), Some(gid)) => format!("{uid}:{gid}"),
+        (Some(uid), None) => uid.to_string(),
+        (None, Some(gid)) => format!(":{gid}"),
+        (None, None) => String::new(),
+    }
 }
 
 /// List only the subdirectories of `path` (no files). Used to build the tree.

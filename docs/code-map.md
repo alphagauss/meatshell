@@ -298,10 +298,11 @@
 职责：
 - 独立文件传输窗口的本地文件系统 helper
 - 用 `std::fs::read_dir` 列本地目录，并排序为目录优先
+- 本地目录条目会补齐类型、修改时间、权限属性和所有者字段；Windows 本地权限/所有者允许为空
 - 解析本地上级目录和默认本地目录；本地 open/edit/rename 也放在这里；远程传输仍由 `src/sftp.rs` 负责
 
 关键符号：
-- `LocalFileEntry`
+- `LocalFileEntry`（文件名、路径、目录标记、类型、权限、所有者、大小、修改时间）
 - `default_local_dir(...)`
 - `resolve_local_path(...)`
 - `list_local_dir(...)`
@@ -390,7 +391,7 @@
 - 注入 `PROMPT_COMMAND` 获取远程 cwd 时使用前导空格并过滤回显，避免 bookkeeping 命令显示或进入常见 shell history
 
 关键符号：
-- `RemoteEntry`
+- `RemoteEntry`（SFTP 列表条目，包含类型、权限、所有者、大小和修改时间等展示字段）
 - `RemoteTreeNode`
 - `SessionCommand`
 - `SessionEvent`
@@ -690,6 +691,7 @@
 ### `ui/local_file_panel.slint`
 职责：
 - 文件传输窗口左侧本机目录列表
+- 列表列为名称、大小、类型、修改时间、属性、所有者和传输操作
 - 支持进入目录、返回上级、刷新，以及上传本地文件到当前远程目录
 - 支持右键菜单：传输、打开、编辑、重命名；目录传输复用 `src/sftp.rs` 的递归上传能力
 
@@ -699,6 +701,7 @@
 ### `ui/remote_file_panel.slint`
 职责：
 - 文件传输窗口右侧远程目录列表
+- 列表列为名称、大小、类型、修改时间、属性、所有者和传输操作
 - 支持进入目录、返回上级、刷新，以及下载远程文件到当前本地目录
 - 支持右键菜单：传输、打开、编辑、重命名；目录传输复用 `src/sftp.rs` 的递归下载能力
 
@@ -721,7 +724,7 @@
 ### `ui/sftp_panel.slint`
 职责：
 - 远端目录树
-- 文件列表
+- 文件列表；`SftpEntry` 由主 SFTP 面板和文件传输窗口的本地/远程列表共享，包含类型、权限和所有者字段
 - 右键菜单
 
 关键符号：

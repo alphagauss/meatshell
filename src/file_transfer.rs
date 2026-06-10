@@ -3,11 +3,16 @@ use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result};
 
+use crate::i18n::t;
+
 #[derive(Clone)]
 pub struct LocalFileEntry {
     pub name: String,
     pub full_path: String,
     pub is_dir: bool,
+    pub file_type: String,
+    pub permissions: String,
+    pub owner: String,
     pub size: u64,
     pub modified: u64,
 }
@@ -53,6 +58,9 @@ pub fn list_local_dir(path: impl AsRef<Path>) -> Result<(String, Vec<LocalFileEn
             name: item.file_name().to_string_lossy().to_string(),
             full_path: item.path().to_string_lossy().to_string(),
             is_dir: meta.is_dir(),
+            file_type: local_file_type(&item.path(), meta.is_dir()),
+            permissions: local_permissions(&meta, meta.is_dir()),
+            owner: String::new(),
             size: if meta.is_file() { meta.len() } else { 0 },
             modified,
         });
@@ -63,6 +71,39 @@ pub fn list_local_dir(path: impl AsRef<Path>) -> Result<(String, Vec<LocalFileEn
         _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
     Ok((display_path, entries))
+}
+
+fn local_file_type(path: &Path, is_dir: bool) -> String {
+    if is_dir {
+        return t("文件夹", "Folder").to_string();
+    }
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::trim)
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| ext.to_ascii_uppercase())
+        .unwrap_or_else(|| t("文件", "File").to_string())
+}
+
+#[cfg(unix)]
+fn local_permissions(meta: &std::fs::Metadata, is_dir: bool) -> String {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mode = meta.permissions().mode();
+    let mut formatted = String::with_capacity(10);
+    formatted.push(if is_dir { 'd' } else { '-' });
+    for shift in [6, 3, 0] {
+        let bits = (mode >> shift) & 0o7;
+        formatted.push(if bits & 0o4 != 0 { 'r' } else { '-' });
+        formatted.push(if bits & 0o2 != 0 { 'w' } else { '-' });
+        formatted.push(if bits & 0o1 != 0 { 'x' } else { '-' });
+    }
+    formatted
+}
+
+#[cfg(not(unix))]
+fn local_permissions(_meta: &std::fs::Metadata, _is_dir: bool) -> String {
+    String::new()
 }
 
 pub fn open_local_path(path: &str) -> Result<()> {

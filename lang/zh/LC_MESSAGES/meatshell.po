@@ -191,3 +191,12 @@ msgstr "代理（可选）"
 
 msgid "Leave blank to use $ALL_PROXY or connect directly"
 msgstr "留空则用 $ALL_PROXY 环境变量，或直接连接"
+
+msgid "Type"
+msgstr "类型"
+
+msgid "Attributes"
+msgstr "属性"
+
+msgid "Owner"
+msgstr "所有者"

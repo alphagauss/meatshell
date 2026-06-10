@@ -380,6 +380,9 @@ pub(super) fn apply_session_event_to_window(
                     name: e.name.clone().into(),
                     full_path: e.full_path.clone().into(),
                     is_dir: e.is_dir,
+                    type_name: e.file_type.clone().into(),
+                    permissions: e.permissions.clone().into(),
+                    owner: e.owner.clone().into(),
                     size: if e.is_dir {
                         "".into()
                     } else {

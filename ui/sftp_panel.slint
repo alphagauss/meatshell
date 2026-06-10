@@ -9,6 +9,9 @@ export struct SftpEntry {
     name: string,
     full-path: string,
     is-dir: bool,
+    type-name: string,
+    permissions: string,
+    owner: string,
     size: string,
     modified: string,
 }
@@ -228,9 +231,15 @@ export component SftpPanel inherits Rectangle {
                         Text { text: @tr("Name"); color: Theme.text-muted; font-size: Theme.fs-xs;
                                horizontal-stretch: 1; vertical-alignment: center; }
                         Text { text: @tr("Size"); color: Theme.text-muted; font-size: Theme.fs-xs;
-                               width: 72px; horizontal-alignment: right; vertical-alignment: center; }
+                               width: 68px; horizontal-alignment: right; vertical-alignment: center; }
+                        Text { text: @tr("Type"); color: Theme.text-muted; font-size: Theme.fs-xs;
+                               width: 64px; horizontal-alignment: right; vertical-alignment: center; }
                         Text { text: @tr("Modified"); color: Theme.text-muted; font-size: Theme.fs-xs;
-                               width: 116px; horizontal-alignment: right; vertical-alignment: center; }
+                               width: 112px; horizontal-alignment: right; vertical-alignment: center; }
+                        Text { text: @tr("Attributes"); color: Theme.text-muted; font-size: Theme.fs-xs;
+                               width: 86px; horizontal-alignment: right; vertical-alignment: center; }
+                        Text { text: @tr("Owner"); color: Theme.text-muted; font-size: Theme.fs-xs;
+                               width: 64px; horizontal-alignment: right; vertical-alignment: center; }
                     }
                 }
                 Rectangle { height: 1px; background: Theme.border-subtle; }
@@ -334,12 +343,27 @@ export component SftpPanel inherits Rectangle {
                                 Text {
                                     text: entry.is-dir ? "" : entry.size;
                                     color: Theme.text-secondary; font-size: Theme.fs-xs;
-                                    width: 72px; horizontal-alignment: right; vertical-alignment: center;
+                                    width: 68px; horizontal-alignment: right; vertical-alignment: center;
+                                }
+                                Text {
+                                    text: entry.type-name;
+                                    color: Theme.text-muted; font-size: Theme.fs-xs;
+                                    width: 64px; horizontal-alignment: right; vertical-alignment: center;
                                 }
                                 Text {
                                     text: entry.modified;
                                     color: Theme.text-muted; font-size: Theme.fs-xs;
-                                    width: 116px; horizontal-alignment: right; vertical-alignment: center;
+                                    width: 112px; horizontal-alignment: right; vertical-alignment: center;
+                                }
+                                Text {
+                                    text: entry.permissions;
+                                    color: Theme.text-muted; font-size: Theme.fs-xs;
+                                    width: 86px; horizontal-alignment: right; vertical-alignment: center;
+                                }
+                                Text {
+                                    text: entry.owner;
+                                    color: Theme.text-muted; font-size: Theme.fs-xs;
+                                    width: 64px; horizontal-alignment: right; vertical-alignment: center;
                                 }
                             }
                         }

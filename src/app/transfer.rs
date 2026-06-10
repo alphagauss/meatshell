@@ -581,6 +581,9 @@ pub(super) fn local_entries_model(entries: Vec<LocalFileEntry>) -> ModelRc<SftpE
             name: entry.name.into(),
             full_path: entry.full_path.into(),
             is_dir: entry.is_dir,
+            type_name: entry.file_type.into(),
+            permissions: entry.permissions.into(),
+            owner: entry.owner.into(),
             size: if entry.is_dir {
                 "".into()
             } else {
@@ -603,6 +606,9 @@ pub(super) fn remote_entries_model(entries: Vec<RemoteEntry>) -> ModelRc<SftpEnt
             name: entry.name.into(),
             full_path: entry.full_path.into(),
             is_dir: entry.is_dir,
+            type_name: entry.file_type.into(),
+            permissions: entry.permissions.into(),
+            owner: entry.owner.into(),
             size: if entry.is_dir {
                 "".into()
             } else {
