@@ -20,7 +20,7 @@
 - [x] step-010：回归上游 shell integration 隐藏注入命令修复
 - [x] step-011：回归上游连接配置导入/导出和会话分组基础能力
 - [x] step-012：修复 debug 启动 ICU4X ja 分词模型重复报错
-- [ ] step-013：修复主界面菜单栏位置，菜单栏在标签页上方
+- [x] step-013：修复主界面菜单栏位置，菜单栏在标签页上方
 - [ ] step-014：修复标签页/菜单按钮 tooltip 被遮挡
 - [ ] step-015：增加统一 active session guard，禁止新标签页执行会话操作
 - [ ] step-016：修复 Alacritty 模式普通页面鼠标滚动不生效

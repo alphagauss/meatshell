@@ -539,7 +539,7 @@
 职责：
 - 顶层窗口 `AppWindow`
 - 定义 Rust 侧需要的全部回调和模型字段
-- 组装左侧栏、Tab 栏、顶部工具栏、欢迎页、终端页、底部面板、会话对话框
+- 组装左侧栏、顶部工具栏、Tab 栏、欢迎页、终端页、底部面板、会话对话框；右侧主区域顺序是顶部工具栏、Tab 栏、内容区
 - 右上角 settings popup 继续承载导入 `~/.ssh/config`、连接导入/导出、语言切换、终端引擎默认值切换和 About 入口
 - settings popup 还承载终端字体和字号选择；主题暗/亮状态通过 `dark-mode` 绑定到 `Theme.dark`
 - 暴露 `sidebar-visible`、`bottom-panel-visible`、`bottom-panel-tab` 布局状态给 Rust 侧 `AppState`

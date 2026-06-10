@@ -242,10 +242,20 @@ export component AppWindow inherits Window {
             select-net-iface(i) => { root.select-net-iface(i); }
         }
 
-        // Right side: tabs + content
+        // Right side: top action bar + tabs + content
         VerticalLayout {
             spacing: 0;
             horizontal-stretch: 1;
+
+            TopActionBar {
+                sidebar-visible: root.sidebar-visible;
+                bottom-panel-visible: root.bottom-panel-visible;
+                toggle-sidebar => { root.toggle-sidebar(); }
+                toggle-bottom-panel => { root.toggle-bottom-panel(); }
+                disconnect-active-tab => { root.disconnect-active-tab(); }
+                reconnect-active-tab => { root.reconnect-active-tab(); }
+                open-transfer-window => { root.open-transfer-window(); }
+            }
 
             TabBar {
                 tabs: root.tabs;
@@ -256,16 +266,6 @@ export component AppWindow inherits Window {
                 }
                 tab-closed(id) => { root.tab-closed(id); }
                 new-tab() => { root.new-tab-clicked(); }
-            }
-
-            TopActionBar {
-                sidebar-visible: root.sidebar-visible;
-                bottom-panel-visible: root.bottom-panel-visible;
-                toggle-sidebar => { root.toggle-sidebar(); }
-                toggle-bottom-panel => { root.toggle-bottom-panel(); }
-                disconnect-active-tab => { root.disconnect-active-tab(); }
-                reconnect-active-tab => { root.reconnect-active-tab(); }
-                open-transfer-window => { root.open-transfer-window(); }
             }
 
             // Content area swaps based on active tab kind.
