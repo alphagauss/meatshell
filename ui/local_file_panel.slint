@@ -149,7 +149,7 @@ export component LocalFilePanel inherits Rectangle {
                         x: row.mx;
                         y: row.my;
                         width: 112px;
-                        height: (entry.is-dir ? 2 : 4) * 27px + 8px;
+                        height: (entry.is-dir ? 3 : 4) * 27px + 8px;
                         Rectangle {
                             background: Theme.bg-panel;
                             border-radius: Theme.radius-sm;
@@ -160,7 +160,7 @@ export component LocalFilePanel inherits Rectangle {
                             VerticalLayout {
                                 padding: 4px;
                                 spacing: 1px;
-                                if !entry.is-dir : FileMenuItem {
+                                FileMenuItem {
                                     label: @tr("Transfer");
                                     clicked => { root.upload(entry.full-path); }
                                 }
@@ -216,14 +216,12 @@ export component LocalFilePanel inherits Rectangle {
                             width: 28px;
                             height: 22px;
                             border-radius: Theme.radius-sm;
-                            background: !entry.is-dir && upload-ta.has-hover ? Theme.bg-hover : transparent;
+                            background: upload-ta.has-hover ? Theme.bg-hover : transparent;
                             upload-ta := TouchArea {
-                                enabled: !entry.is-dir;
                                 mouse-cursor: pointer;
                                 clicked => { root.upload(entry.full-path); }
                             }
                             Text {
-                                visible: !entry.is-dir;
                                 text: "\u{E2C3}";
                                 font-family: "Material Icons";
                                 color: Theme.text-secondary;
