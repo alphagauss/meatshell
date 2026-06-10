@@ -54,6 +54,7 @@
 职责：
 - 顶层 UI 状态机和 glue code
 - 初始化 `src/app/state.rs` 里的 `AppState`，并把默认布局状态同步到 Slint 窗口属性
+- 初始化语言、暗/亮主题、终端字体/字号和默认终端引擎设置；字体列表由 `system_monospace_fonts(...)` 枚举系统等宽字体
 - 通过 `ConnectionManager` 管理每个终端 tab 的 SSH runtime
 - 持有当前终端 wrapper，新建会话时按 `ConfigStore::terminal_engine_mode()` 选择默认终端引擎；缺省优先 Alacritty Experimental，初始化失败时当前会话回退到 legacy vt100 fallback 并提示
 - 维护 tabs / terminals / SFTP 状态
@@ -62,6 +63,7 @@
 
 关键符号：
 - `run()`
+- `system_monospace_fonts(...)`
 定位提示：
 - 任何 callback 签名变动，通常都要同时改这里和 `ui/app.slint`
 - 终端显示问题，优先查 `src/terminal/legacy.rs` 和 `src/app/events.rs`

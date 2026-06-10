@@ -104,6 +104,30 @@ pub fn run() -> Result<()> {
     crate::i18n::set_language(store.borrow().language());
     crate::i18n::apply_to_slint();
     window.set_lang_en(crate::i18n::is_en());
+
+    {
+        let is_dark = match store.borrow().theme_pref() {
+            "light" => false,
+            "dark" => true,
+            _ => match dark_light::detect() {
+                dark_light::Mode::Light => false,
+                dark_light::Mode::Dark => true,
+                dark_light::Mode::Default => true,
+            },
+        };
+        window.set_dark_mode(is_dark);
+    }
+    {
+        let s = store.borrow();
+        let family = s.font_family().to_string();
+        if !family.is_empty() {
+            window.set_term_font_family(family.into());
+        }
+        window.set_term_font_size(s.font_size() as f32);
+    }
+    window.set_term_fonts(ModelRc::from(Rc::new(VecModel::from(
+        system_monospace_fonts(),
+    ))));
     window.set_terminal_engine_mode(store.borrow().terminal_engine_mode().as_str().into());
 
     let app_state = Rc::new(RefCell::new(AppState::default()));
@@ -220,6 +244,57 @@ pub fn run() -> Result<()> {
             if let Some(w) = weak.upgrade() {
                 w.set_lang_en(crate::i18n::is_en());
                 w.invoke_refresh_sidebar();
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        window.on_toggle_theme(move || {
+            let Some(w) = weak.upgrade() else { return };
+            let next_dark = !w.get_dark_mode();
+            w.set_dark_mode(next_dark);
+            {
+                let mut s = store.borrow_mut();
+                s.set_theme_pref(if next_dark { "dark" } else { "light" }.to_string());
+                if let Err(err) = s.save() {
+                    tracing::warn!("failed to save config: {err:#}");
+                }
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        window.on_set_term_font(move |family: SharedString| {
+            {
+                let mut s = store.borrow_mut();
+                s.set_font_family(family.to_string());
+                if let Err(err) = s.save() {
+                    tracing::warn!("failed to save config: {err:#}");
+                }
+            }
+            if let Some(w) = weak.upgrade() {
+                w.set_term_font_family(family);
+            }
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        window.on_set_term_font_size(move |size: i32| {
+            {
+                let mut s = store.borrow_mut();
+                s.set_font_size(size as u32);
+                if let Err(err) = s.save() {
+                    tracing::warn!("failed to save config: {err:#}");
+                }
+            }
+            if let Some(w) = weak.upgrade() {
+                w.set_term_font_size(size as f32);
             }
         });
     }
@@ -469,4 +544,18 @@ pub fn run() -> Result<()> {
 
     window.run().context("event loop exited with error")?;
     Ok(())
+}
+
+/// Enumerate installed monospace font families for the terminal font picker.
+fn system_monospace_fonts() -> Vec<slint::SharedString> {
+    let mut db = fontdb::Database::new();
+    db.load_system_fonts();
+    let mut names: Vec<String> = db
+        .faces()
+        .filter(|f| f.monospaced)
+        .filter_map(|f| f.families.first().map(|(name, _)| name.clone()))
+        .collect();
+    names.sort();
+    names.dedup();
+    names.into_iter().map(slint::SharedString::from).collect()
 }
