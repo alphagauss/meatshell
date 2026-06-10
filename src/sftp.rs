@@ -1110,3 +1110,25 @@ const _: fn() = || {
     let _ = format_mtime(0);
     let _: RemoteTreeNode;
 };
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_filename;
+
+    #[test]
+    fn sanitize_filename_blocks_local_path_escape() {
+        assert_eq!(sanitize_filename("../../evil.txt"), ".._.._evil.txt");
+    }
+
+    #[test]
+    fn sanitize_filename_prefixes_windows_reserved_names() {
+        assert_eq!(sanitize_filename("CON.txt"), "_CON.txt");
+        assert_eq!(sanitize_filename("NUL"), "_NUL");
+        assert_eq!(sanitize_filename("COM1"), "_COM1");
+    }
+
+    #[test]
+    fn sanitize_filename_replaces_shell_special_chars() {
+        assert_eq!(sanitize_filename("a&b$'c.txt"), "a_b__c.txt");
+    }
+}

@@ -432,7 +432,7 @@
 - SFTP 列表和树不一致，先看 `build_tree_nodes(...)` 和 `list_dir_impl(...)`
 - SFTP 连接和代理问题，先看 `run_sftp(...)` / `src/proxy.rs`
 - 下载 / 上传进度条问题，先看 `emit_transfer(...)`、`download_impl(...)`、`upload_pipelined(...)`
-- “查看 / 编辑” 的临时文件安全问题，先看 `sanitize_filename(...)` 和 `open_with_os(...)`
+- 远程文件名落地到本地下载目录或“查看 / 编辑”临时文件时的安全问题，先看 `sanitize_filename(...)` 和 `open_with_os(...)`
 
 ### `src/config.rs`
 职责：
