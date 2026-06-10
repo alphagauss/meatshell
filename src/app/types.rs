@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::config::Session;
 use crate::connection::ConnectionManager;
 use crate::sftp::SftpHandle;
 use crate::system::SystemSnapshot;
@@ -43,9 +44,19 @@ pub(super) type TabStatuses = Arc<Mutex<HashMap<String, TabStatus>>>;
 pub(super) type LocalSnap = Arc<Mutex<SystemSnapshot>>;
 
 #[allow(dead_code)]
+pub(super) struct TransferRemoteTab {
+    pub(super) id: String,
+    pub(super) title: String,
+    pub(super) session: Session,
+    pub(super) sftp: Rc<SftpHandle>,
+    pub(super) remote_path: String,
+    pub(super) connected: bool,
+}
+
+#[allow(dead_code)]
 pub(super) struct TransferWindowState {
     pub(super) window: super::TransferWindow,
-    pub(super) _sftp: Rc<SftpHandle>,
+    pub(super) remote_tabs: Rc<RefCell<Vec<TransferRemoteTab>>>,
 }
 pub(super) type TransferWindows = Rc<RefCell<Option<TransferWindowState>>>;
 

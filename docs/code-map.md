@@ -211,10 +211,13 @@
 - 负责把 `src/file_transfer.rs` 的本地目录 helper 和 `src/sftp.rs` 的 worker 接到 `ui/transfer_window.slint`
 - 顶部工具栏的打开文件传输入口通过 `active_session_or_hint(...)` 阻止欢迎页误开窗口
 - 文件传输窗口当前是单例：重复打开时复用已有 `TransferWindowState` 并重新 show，关闭按钮和窗口关闭请求只 hide，不销毁 SFTP 状态
+- 文件传输窗口右侧远程区按 SSH session 建 tab；同一 session 复用并激活已有 tab，不同 session 追加 tab，SFTP 事件只更新当前 active remote tab
 
 关键符号：
 - `open_transfer_window(...)`
 - `wire_transfer_window_callbacks(...)`
+- `ensure_transfer_remote_tab(...)`
+- `sync_transfer_remote_tabs(...)`
 - `refresh_transfer_local(...)`
 - `local_entries_model(...)`
 - `remote_entries_model(...)`
@@ -236,7 +239,7 @@
 ### `src/app/types.rs`
 职责：
 - 保存 app 作用域内的状态别名和轻量结构体，供 `src/app/mod.rs` 和后续 app 子模块复用
-- 现在只放连接 / SFTP / 隧道 / 终端缓冲区相关的别名、tab 状态、单例传输窗口状态和网卡历史长度常量
+- 现在只放连接 / SFTP / 隧道 / 终端缓冲区相关的别名、tab 状态、单例传输窗口状态、传输窗口远程 tab 状态和网卡历史长度常量
 
 关键符号：
 - `TermBuffers`
@@ -248,6 +251,7 @@
 - `TabStatus`
 - `TabStatuses`
 - `LocalSnap`
+- `TransferRemoteTab`
 - `TransferWindowState`
 - `TransferWindows`
 - `NetHist`
@@ -596,6 +600,7 @@
 - `move-session`
 - `toggle-group`
 - 导出类型：`SessionInfo`、`SessionDraft`、`TabInfo`、`SftpEntry`、`SftpTreeNode`、`TunnelRuleInfo`
+- 额外导出文件传输窗口类型：`TransferWindow`、`TransferRemoteTabInfo`
 
 定位提示：
 - Rust 回调名、属性名、模型字段改动时，先改这里
@@ -658,10 +663,12 @@
 职责：
 - 独立文件传输窗口外壳
 - 左侧承载 `LocalFilePanel`，右侧承载 `RemoteFilePanel`
+- 右侧远程区顶部显示 remote tab 条，并暴露选择/关闭/重连回调给 Rust
 - 暴露本地/远程导航、刷新、上传、下载、关闭回调给 `src/app/mod.rs`
 
 关键符号：
 - `TransferWindow`
+- `TransferRemoteTabInfo`
 
 ### `ui/local_file_panel.slint`
 职责：

@@ -5,6 +5,12 @@ import { SftpEntry } from "sftp_panel.slint";
 import { LocalFilePanel } from "local_file_panel.slint";
 import { RemoteFilePanel } from "remote_file_panel.slint";
 
+export struct TransferRemoteTabInfo {
+    id: string,
+    title: string,
+    connected: bool,
+}
+
 export component TransferWindow inherits Window {
     title: @tr("File transfer");
     min-width: 880px;
@@ -21,6 +27,8 @@ export component TransferWindow inherits Window {
     in property <[SftpEntry]> remote-entries;
     in property <string> remote-status;
     in property <bool> remote-loading;
+    in property <[TransferRemoteTabInfo]> remote-tabs;
+    in-out property <string> active-remote-tab-id;
 
     callback local-navigate(string);
     callback local-refresh();
@@ -28,6 +36,9 @@ export component TransferWindow inherits Window {
     callback remote-navigate(string);
     callback remote-refresh();
     callback download-remote(string);
+    callback remote-tab-selected(string);
+    callback remote-tab-closed(string);
+    callback remote-tab-reconnect(string);
     callback close-window();
 
     VerticalLayout {
@@ -87,15 +98,81 @@ export component TransferWindow inherits Window {
 
             Rectangle { width: 1px; background: Theme.border-strong; }
 
-            RemoteFilePanel {
+            VerticalLayout {
                 horizontal-stretch: 1;
-                current-path: root.remote-path;
-                entries: root.remote-entries;
-                status: root.remote-status;
-                loading: root.remote-loading;
-                navigate(path) => { root.remote-navigate(path); }
-                refresh() => { root.remote-refresh(); }
-                download(path) => { root.download-remote(path); }
+                spacing: 0;
+
+                Rectangle {
+                    height: 30px;
+                    background: Theme.bg-panel-alt;
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        spacing: 4px;
+
+                        for tab[i] in root.remote-tabs : Rectangle {
+                            width: 168px;
+                            height: 26px;
+                            border-radius: Theme.radius-sm;
+                            background: root.active-remote-tab-id == tab.id ? Theme.bg-active : (tab-ta.has-hover ? Theme.bg-hover : transparent);
+                            tab-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.remote-tab-selected(tab.id); }
+                            }
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 4px;
+                                spacing: 5px;
+                                Text {
+                                    text: "\u{E2C8}";
+                                    font-family: "Material Icons";
+                                    color: tab.connected ? Theme.success : Theme.text-muted;
+                                    font-size: Theme.fs-sm;
+                                    width: 16px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: tab.title;
+                                    color: Theme.text-primary;
+                                    font-size: Theme.fs-sm;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle {
+                                    width: 20px;
+                                    height: 20px;
+                                    border-radius: Theme.radius-sm;
+                                    background: close-tab-ta.has-hover ? Theme.bg-hover : transparent;
+                                    close-tab-ta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.remote-tab-closed(tab.id); }
+                                    }
+                                    Text {
+                                        text: "\u{E5CD}";
+                                        font-family: "Material Icons";
+                                        color: Theme.text-secondary;
+                                        font-size: Theme.fs-xs;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                RemoteFilePanel {
+                    vertical-stretch: 1;
+                    current-path: root.remote-path;
+                    entries: root.remote-entries;
+                    status: root.remote-status;
+                    loading: root.remote-loading;
+                    navigate(path) => { root.remote-navigate(path); }
+                    refresh() => { root.remote-refresh(); }
+                    download(path) => { root.download-remote(path); }
+                }
             }
         }
     }
