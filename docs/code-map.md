@@ -23,7 +23,7 @@
 7. `src/app/state.rs` 保存少量跨组件 UI 布局状态，当前只覆盖侧边栏、底部面板显示和底部面板页签
 8. `src/connection.rs` 保存每个终端 tab 的连接运行态，统一包装 SSH session 的连接、断开、重连和状态
 9. `src/terminal/mod.rs` 是终端核心模块入口；`src/terminal/types.rs` / `src/terminal/engine.rs` 定义终端渲染数据、引擎模式和最小终端引擎 trait，`src/terminal/legacy.rs` 提供 legacy vt100 fallback 实现和 Alacritty 初始化失败时的回退入口，`src/terminal/alacritty.rs` 提供 Alacritty Experimental 引擎
-10. `src/file_transfer.rs`、`src/app/transfer.rs` 和 `ui/transfer_window.slint` 提供独立文件传输窗口第一版；远程侧复用 `src/sftp.rs` worker
+10. `src/file_transfer.rs`、`src/app/transfer.rs`、`ui/transfer_window.slint` 和 `ui/transfer_info.slint` 提供独立文件传输窗口第一版；远程侧复用 `src/sftp.rs` worker，传输记录模型与主窗口下载 popup 共享
 11. `src/tunnel.rs`、`src/app/tunnels.rs` 和 `ui/tunnel_panel.slint` 提供当前 session 关联的 Local Forward 隧道规则、持久化和后台转发任务
 
 ## 2. 先看哪个文件
@@ -155,11 +155,13 @@
 职责：
 - 保存 session / SFTP 事件泵，以及把 `SessionEvent` 映射到 Slint UI 模型的 glue
 - 连接成功时继续触发隧道自动启动，连接断开时继续停止对应隧道
+- `upsert_transfer_record(...)` 是主窗口 SFTP 面板和独立文件传输窗口共用的传输记录更新入口
 
 关键符号：
 - `spawn_shell_event_pump(...)`
 - `spawn_sftp_event_pump(...)`
 - `apply_session_event_to_window(...)`
+- `upsert_transfer_record(...)`
 
 ### `src/app/sidebar.rs`
 职责：
@@ -213,6 +215,7 @@
 - 文件传输窗口当前是单例：重复打开时复用已有 `TransferWindowState` 并重新 show，关闭按钮和窗口关闭请求只 hide，不销毁 SFTP 状态
 - 文件传输窗口右侧远程区按 SSH session 建 tab；同一 session 复用并激活已有 tab，不同 session 追加 tab，SFTP 事件只更新当前 active remote tab
 - 文件传输窗口远程 tab 双击会替换该 tab 的 SFTP worker，并按该 tab 当前远程路径重新加载
+- 文件传输窗口底部显示与主窗口下载 popup 共享的 `TransferInfo` 记录模型，清空动作复用同一个 `VecModel`；传输进度记录不受 active remote tab 过滤影响
 
 关键符号：
 - `open_transfer_window(...)`
@@ -602,7 +605,7 @@
 - `move-session`
 - `toggle-group`
 - 导出类型：`SessionInfo`、`SessionDraft`、`TabInfo`、`SftpEntry`、`SftpTreeNode`、`TunnelRuleInfo`
-- 额外导出文件传输窗口类型：`TransferWindow`、`TransferRemoteTabInfo`
+- 额外导出文件传输窗口类型：`TransferWindow`、`TransferRemoteTabInfo`、`TransferInfo`
 
 定位提示：
 - Rust 回调名、属性名、模型字段改动时，先改这里
@@ -666,11 +669,19 @@
 - 独立文件传输窗口外壳
 - 左侧承载 `LocalFilePanel`，右侧承载 `RemoteFilePanel`
 - 右侧远程区顶部显示 remote tab 条，并暴露选择/关闭/双击重连回调给 Rust
+- 底部显示共享传输记录窗格，复用 `TransferInfo` 模型和清空回调
 - 暴露本地/远程导航、刷新、上传、下载、关闭回调给 `src/app/mod.rs`
 
 关键符号：
 - `TransferWindow`
 - `TransferRemoteTabInfo`
+
+### `ui/transfer_info.slint`
+职责：
+- 定义主窗口下载 popup 和独立文件传输窗口共用的传输记录结构
+
+关键符号：
+- `TransferInfo`
 
 ### `ui/local_file_panel.slint`
 职责：

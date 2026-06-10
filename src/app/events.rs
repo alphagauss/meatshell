@@ -20,6 +20,58 @@ use super::{
     AppWindow, SftpEntry, SftpTreeNode, TabInfo, TermMatch, TermSpan, TerminalState, TransferInfo,
 };
 
+pub(super) fn upsert_transfer_record(
+    transfers: ModelRc<TransferInfo>,
+    id: String,
+    name: String,
+    is_upload: bool,
+    transferred: u64,
+    total: u64,
+    state: u8,
+) {
+    let detail = match state {
+        2 => t("失败", "Failed").to_string(),
+        1 => t("已完成", "Done").to_string(),
+        _ => {
+            if total > 0 {
+                format!("{}/{}", format_size(transferred), format_size(total))
+            } else {
+                format_size(transferred)
+            }
+        }
+    };
+    let percent = if state == 1 {
+        1.0
+    } else if total > 0 {
+        (transferred as f32 / total as f32).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let rec = TransferInfo {
+        id: id.clone().into(),
+        name: name.into(),
+        detail: detail.into(),
+        percent,
+        state: state as i32,
+        is_upload,
+    };
+    if let Some(model) = transfers.as_any().downcast_ref::<VecModel<TransferInfo>>() {
+        let mut found = None;
+        for i in 0..model.row_count() {
+            if let Some(row) = model.row_data(i) {
+                if row.id.as_str() == id.as_str() {
+                    found = Some(i);
+                    break;
+                }
+            }
+        }
+        match found {
+            Some(i) => model.set_row_data(i, rec),
+            None => model.insert(0, rec),
+        }
+    }
+}
+
 pub(super) fn spawn_shell_event_pump(
     weak: slint::Weak<AppWindow>,
     tab_id: String,
@@ -369,51 +421,15 @@ pub(super) fn apply_session_event_to_window(
             state,
             msg: _,
         } => {
-            let detail = match state {
-                2 => t("失败", "Failed").to_string(),
-                1 => t("已完成", "Done").to_string(),
-                _ => {
-                    if total > 0 {
-                        format!("{}/{}", format_size(transferred), format_size(total))
-                    } else {
-                        format_size(transferred)
-                    }
-                }
-            };
-            let percent = if state == 1 {
-                1.0
-            } else if total > 0 {
-                (transferred as f32 / total as f32).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            let rec = TransferInfo {
-                id: id.clone().into(),
-                name: name.into(),
-                detail: detail.into(),
-                percent,
-                state: state as i32,
+            upsert_transfer_record(
+                win.get_transfers(),
+                id,
+                name,
                 is_upload,
-            };
-            if let Some(model) = win
-                .get_transfers()
-                .as_any()
-                .downcast_ref::<VecModel<TransferInfo>>()
-            {
-                let mut found = None;
-                for i in 0..model.row_count() {
-                    if let Some(row) = model.row_data(i) {
-                        if row.id.as_str() == id.as_str() {
-                            found = Some(i);
-                            break;
-                        }
-                    }
-                }
-                match found {
-                    Some(i) => model.set_row_data(i, rec),
-                    None => model.insert(0, rec), // newest at top
-                }
-            }
+                transferred,
+                total,
+                state,
+            );
         }
     }
 }

@@ -12,18 +12,23 @@ use crate::i18n::t;
 use crate::sftp::{spawn_sftp, SftpHandle};
 use crate::ssh::{format_mtime, format_size, RemoteEntry, SessionEvent};
 
+use super::events::upsert_transfer_record;
 use super::models::{active_session_or_hint, set_terminal_row};
 use super::sftp_panel::parent_path;
 use super::types::{TransferRemoteTab, TransferWindowState, TransferWindows};
-use super::{SftpEntry, TransferRemoteTabInfo, TransferWindow};
+use super::{SftpEntry, TransferInfo, TransferRemoteTabInfo, TransferWindow};
 
 pub(super) fn open_transfer_window(
     session: Session,
     runtime: Arc<Runtime>,
     preferred_local_dir: String,
     transfer_windows: TransferWindows,
+    transfers_model: Rc<VecModel<TransferInfo>>,
 ) -> Result<()> {
     if let Some(existing) = transfer_windows.borrow().as_ref() {
+        existing
+            .window
+            .set_transfers(ModelRc::from(transfers_model.clone()));
         remember_active_remote_path(&existing.window, &existing.remote_tabs);
         ensure_transfer_remote_tab(
             &existing.window,
@@ -48,10 +53,16 @@ pub(super) fn open_transfer_window(
     window.set_remote_status(t("SFTP 连接中...", "SFTP connecting...").into());
     window.set_remote_loading(true);
     window.set_remote_entries(ModelRc::from(Rc::new(VecModel::<SftpEntry>::default())));
+    window.set_transfers(ModelRc::from(transfers_model.clone()));
     refresh_transfer_local(&window, default_local_dir(&preferred_local_dir));
 
     let remote_tabs = Rc::new(std::cell::RefCell::new(Vec::new()));
-    wire_transfer_window_callbacks(&window, remote_tabs.clone(), runtime.clone());
+    wire_transfer_window_callbacks(
+        &window,
+        remote_tabs.clone(),
+        runtime.clone(),
+        transfers_model.clone(),
+    );
     ensure_transfer_remote_tab(&window, remote_tabs.clone(), session, runtime.clone());
     window.window().on_close_requested({
         let weak = window.as_weak();
@@ -76,6 +87,7 @@ pub(super) fn wire_transfer_toolbar_callbacks(
     runtime: Arc<Runtime>,
     store: Rc<std::cell::RefCell<ConfigStore>>,
     transfer_windows: TransferWindows,
+    transfers_model: Rc<VecModel<TransferInfo>>,
 ) {
     let weak = window.as_weak();
     window.on_open_transfer_window(move || {
@@ -89,6 +101,7 @@ pub(super) fn wire_transfer_toolbar_callbacks(
             runtime.clone(),
             local_dir,
             transfer_windows.clone(),
+            transfers_model.clone(),
         ) {
             Ok(()) => {}
             Err(err) => set_terminal_row(&w, &active, |row| {
@@ -316,6 +329,7 @@ pub(super) fn wire_transfer_window_callbacks(
     window: &TransferWindow,
     remote_tabs: Rc<std::cell::RefCell<Vec<TransferRemoteTab>>>,
     runtime: Arc<Runtime>,
+    transfers_model: Rc<VecModel<TransferInfo>>,
 ) {
     {
         let weak = window.as_weak();
@@ -427,6 +441,10 @@ pub(super) fn wire_transfer_window_callbacks(
         });
     }
     {
+        let transfers_model = transfers_model.clone();
+        window.on_clear_transfers(move || transfers_model.set_vec(Vec::<TransferInfo>::new()));
+    }
+    {
         let weak = window.as_weak();
         window.on_close_window(move || {
             if let Some(w) = weak.upgrade() {
@@ -507,27 +525,34 @@ pub(super) fn spawn_transfer_sftp_event_pump(
             let tab_id = tab_id.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 let Some(window) = weak.upgrade() else { return };
-                if window.get_active_remote_tab_id().as_str() != tab_id {
-                    return;
-                }
-                apply_transfer_event_to_window(&window, event);
+                let is_active = window.get_active_remote_tab_id().as_str() == tab_id;
+                apply_transfer_event_to_window(&window, event, is_active);
             });
         }
     });
 }
 
-pub(super) fn apply_transfer_event_to_window(window: &TransferWindow, event: SessionEvent) {
+pub(super) fn apply_transfer_event_to_window(
+    window: &TransferWindow,
+    event: SessionEvent,
+    is_active: bool,
+) {
     match event {
         SessionEvent::SftpEntries { path, entries } => {
-            window.set_remote_path(path.into());
-            window.set_remote_entries(remote_entries_model(entries));
-            window.set_remote_loading(false);
+            if is_active {
+                window.set_remote_path(path.into());
+                window.set_remote_entries(remote_entries_model(entries));
+                window.set_remote_loading(false);
+            }
         }
         SessionEvent::SftpStatus(msg) => {
-            window.set_remote_status(msg.into());
-            window.set_remote_loading(false);
+            if is_active {
+                window.set_remote_status(msg.into());
+                window.set_remote_loading(false);
+            }
         }
         SessionEvent::SftpTransfer {
+            id,
             name,
             is_upload,
             transferred,
@@ -535,6 +560,18 @@ pub(super) fn apply_transfer_event_to_window(window: &TransferWindow, event: Ses
             state,
             ..
         } => {
+            upsert_transfer_record(
+                window.get_transfers(),
+                id,
+                name.clone(),
+                is_upload,
+                transferred,
+                total,
+                state,
+            );
+            if !is_active {
+                return;
+            }
             let detail = if state == 1 {
                 t("完成", "Done").to_string()
             } else if state == 2 {

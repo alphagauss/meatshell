@@ -159,6 +159,14 @@ pub fn run() -> Result<()> {
     let tab_statuses: TabStatuses = Arc::new(Mutex::new(HashMap::new()));
     let local_snap: LocalSnap = Arc::new(Mutex::new(SystemSnapshot::default()));
     let local_net_hist: NetHist = Arc::new(Mutex::new(vec![0.0; NET_HISTORY_LEN]));
+    // Shared transfer records shown both in the main download popup and in the
+    // standalone transfer window.
+    let transfers_model: Rc<VecModel<TransferInfo>> = Rc::new(VecModel::default());
+    window.set_transfers(ModelRc::from(transfers_model.clone()));
+    {
+        let tm = transfers_model.clone();
+        window.on_clear_transfers(move || tm.set_vec(Vec::<TransferInfo>::new()));
+    }
     let transfer_windows: TransferWindows = Rc::new(RefCell::new(None));
 
     // --- Wire callbacks --------------------------------------------------
@@ -200,6 +208,7 @@ pub fn run() -> Result<()> {
         runtime.clone(),
         store.clone(),
         transfer_windows.clone(),
+        transfers_model.clone(),
     );
 
     // Recompute the sidebar whenever the active tab changes (fired from Slint's
@@ -382,14 +391,6 @@ pub fn run() -> Result<()> {
                 let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
             }
         });
-    }
-
-    // Transfer records (download/upload progress + history) shown in the popup.
-    let transfers_model: Rc<VecModel<TransferInfo>> = Rc::new(VecModel::default());
-    window.set_transfers(ModelRc::from(transfers_model.clone()));
-    {
-        let tm = transfers_model.clone();
-        window.on_clear_transfers(move || tm.set_vec(Vec::<TransferInfo>::new()));
     }
 
     // Open-source libraries shown in the About popup.

@@ -2,6 +2,7 @@ import "fonts/MaterialIcons-Regular.ttf";
 
 import { Theme } from "theme.slint";
 import { SftpEntry } from "sftp_panel.slint";
+import { TransferInfo } from "transfer_info.slint";
 import { LocalFilePanel } from "local_file_panel.slint";
 import { RemoteFilePanel } from "remote_file_panel.slint";
 
@@ -29,6 +30,7 @@ export component TransferWindow inherits Window {
     in property <bool> remote-loading;
     in property <[TransferRemoteTabInfo]> remote-tabs;
     in-out property <string> active-remote-tab-id;
+    in property <[TransferInfo]> transfers;
 
     callback local-navigate(string);
     callback local-refresh();
@@ -39,6 +41,7 @@ export component TransferWindow inherits Window {
     callback remote-tab-selected(string);
     callback remote-tab-closed(string);
     callback remote-tab-reconnect(string);
+    callback clear-transfers();
     callback close-window();
 
     VerticalLayout {
@@ -173,6 +176,107 @@ export component TransferWindow inherits Window {
                     navigate(path) => { root.remote-navigate(path); }
                     refresh() => { root.remote-refresh(); }
                     download(path) => { root.download-remote(path); }
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.border-strong; }
+
+        Rectangle {
+            height: 132px;
+            background: Theme.bg-panel-alt;
+            VerticalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 6px;
+                padding-bottom: 8px;
+                spacing: 6px;
+
+                HorizontalLayout {
+                    height: 22px;
+                    Text {
+                        text: @tr("Transfers");
+                        color: Theme.text-secondary;
+                        font-size: Theme.fs-sm;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 44px;
+                        height: 20px;
+                        border-radius: Theme.radius-sm;
+                        background: clear-ta.has-hover ? Theme.bg-hover : transparent;
+                        clear-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.clear-transfers(); }
+                        }
+                        Text {
+                            text: @tr("Clear");
+                            color: Theme.text-muted;
+                            font-size: Theme.fs-xs;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Flickable {
+                    vertical-stretch: 1;
+                    viewport-width: self.width;
+                    viewport-height: max(self.height, transfer-col.preferred-height);
+                    transfer-col := VerticalLayout {
+                        alignment: start;
+                        spacing: 4px;
+
+                        if root.transfers.length == 0 : Text {
+                            text: @tr("No transfers yet");
+                            color: Theme.text-muted;
+                            font-size: Theme.fs-xs;
+                        }
+
+                        for item in root.transfers : Rectangle {
+                            height: 32px;
+                            border-radius: Theme.radius-sm;
+                            background: Theme.bg-root;
+                            VerticalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                padding-top: 4px;
+                                padding-bottom: 4px;
+                                spacing: 3px;
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    Text {
+                                        text: (item.is-upload ? "↑ " : "↓ ") + item.name;
+                                        color: Theme.text-primary;
+                                        font-size: Theme.fs-xs;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: item.detail;
+                                        color: item.state == 2 ? Theme.danger : item.state == 1 ? Theme.success : Theme.text-muted;
+                                        font-size: Theme.fs-xs;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Rectangle {
+                                    height: 4px;
+                                    border-radius: 2px;
+                                    background: Theme.bg-elevated;
+                                    Rectangle {
+                                        x: 0;
+                                        y: 0;
+                                        height: parent.height;
+                                        width: parent.width * clamp(item.percent, 0.0, 1.0);
+                                        border-radius: 2px;
+                                        background: item.state == 2 ? Theme.danger : item.state == 1 ? Theme.success : Theme.accent;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

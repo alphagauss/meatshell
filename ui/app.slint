@@ -17,26 +17,17 @@ import { Welcome, SessionInfo } from "welcome.slint";
 import { SessionDialog, SessionDraft } from "session_dialog.slint";
 import { TerminalView, TermSpan, TermMatch } from "terminal_view.slint";
 import { TransferWindow, TransferRemoteTabInfo } from "transfer_window.slint";
+import { TransferInfo } from "transfer_info.slint";
 import { SftpEntry, SftpTreeNode } from "sftp_panel.slint";
 import { TunnelRuleInfo } from "tunnel_panel.slint";
 import { ComboBox, SpinBox } from "std-widgets.slint";
 
-export { SessionInfo, SessionDraft, TabInfo, SftpEntry, SftpTreeNode, TunnelRuleInfo, TransferWindow, TransferRemoteTabInfo }
+export { SessionInfo, SessionDraft, TabInfo, SftpEntry, SftpTreeNode, TunnelRuleInfo, TransferWindow, TransferRemoteTabInfo, TransferInfo }
 
 // --- TerminalState ---------------------------------------------------------
 // Per-terminal view-model exposed to Rust. A TabInfo has the metadata; the
 // TerminalState carries the streaming log + status line. Kept as a parallel
 // model so opening/closing tabs doesn't churn the log strings.
-// One file-transfer record shown in the download manager.
-export struct TransferInfo {
-    id: string,
-    name: string,
-    detail: string,   // "2.3 MB/5.0 MB" | "已完成" | "失败"
-    percent: float,   // 0.0..1.0
-    state: int,       // 0 active / 1 done / 2 error
-    is-upload: bool,
-}
-
 export struct TerminalState {
     id: string,
     status: string,
