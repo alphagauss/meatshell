@@ -1,1244 +1,2369 @@
-# 终端管理器重构与功能开发计划
+# meatshell dev 分支改动执行计划
 
-## 0. 背景与目标
-
-本计划面向当前 Rust + Slint 终端管理器项目。项目后续将从 fork 维护转为独立开发维护，不再以兼容上游为主要目标，但仍要求保持重构克制，避免为了“架构漂亮”引入过度抽象。
-
-目标是把项目逐步演进为一个更接近 Xshell + Xftp 使用体验的自用终端管理器，重点新增能力包括：
-
-1. 完整 VT/ANSI 终端模拟，后续接入 `alacritty_terminal`，支持主流 TUI 应用、PowerShell、鼠标交互等。
-2. 终端标签页上方新增工具栏按钮：侧边栏展开/折叠、下方文件栏展开/折叠、断开当前连接、重连当前连接、新建文件传输。
-3. 下方文件栏改为 tab 面板，至少包含“文件”和“隧道”两个页签。
-4. 连接生命周期统一管理，为终端、SFTP、文件传输、隧道提供统一的连接状态和断开/重连入口。
-5. 新建文件传输窗口，类似 Xftp：左侧本机，右侧远程，远程后续支持多个 tab。
-6. 隧道规则支持和当前终端会话关联，连接后自动启动 enabled 规则，第一版先支持 Local Forward。
+> 适用场景：`main` 分支保持上游同步，`dev` 分支已经把原上游大文件 `src/app.rs` 拆成 `src/app/*.rs`，并新增了 Alacritty 模式、顶部菜单栏、底部窗格、隧道窗格、文件传输窗口等个性化功能。
+>
+> 执行原则：**以 dev 当前模块化架构为主，迁移 main 的成熟代码到 dev 的合适模块，不允许用 main 的 `src/app.rs` 整体覆盖 dev。**
 
 ---
 
-## 执行状态
+## 总体执行规则
 
-- [x] 阶段 0：同步独立维护规则
-- [x] 阶段 1：基线整理与最小 App 分层
-- [x] 阶段 2：顶部工具栏与底部面板骨架
-- [x] 阶段 3：连接生命周期统一入口
-- [x] 阶段 4：终端类型与 Legacy 引擎边界
-- [x] 阶段 5：接入 `alacritty_terminal` 的实验终端引擎
-- [x] 阶段 6：终端鼠标与 TUI 交互增强
-- [x] 阶段 7：独立文件传输窗口第一版
-- [x] 阶段 8：隧道规则与本地端口转发第一版
-- [x] 阶段 9：配置、错误提示、文档与体验收尾
+1. 每个 step 尽量独立提交一次 git commit。
+2. 每完成一个 step，至少执行：
 
----
+```bash
+cargo fmt
+cargo check
+```
 
-## 1. 总体原则
+3. 涉及 UI 的 step，至少启动一次 debug 程序，确认窗口能打开。
+4. 上游回归类 step 必须优先从 `meatshell_main/` 复制或迁移已有代码，不要重新设计同类功能。
+5. `src/app.rs` 是 main 的上游参考文件；dev 中对应拆分落点如下：
 
-### 1.1 独立维护原则
+| main 单体位置                  | dev 推荐落点                           |
+| ------------------------------ | -------------------------------------- |
+| `src/app.rs` 初始化、全局回调  | `src/app/mod.rs`                       |
+| 会话列表、导入导出、连接对话框 | `src/app/sessions.rs`                  |
+| 终端输入、粘贴、鼠标、滚动     | `src/app/terminal_input.rs`            |
+| 终端渲染、主题色、字体应用     | `src/app/terminal_render.rs`           |
+| SFTP 面板回调                  | `src/app/sftp_panel.rs`                |
+| 侧边栏资源刷新                 | `src/app/sidebar.rs`                   |
+| 标签页与连接工具栏             | `src/app/tabs.rs`                      |
+| 文件传输窗口                   | `src/app/transfer.rs`                  |
+| 隧道管理                       | `src/app/tunnels.rs`、`src/tunnel.rs`  |
+| 全局状态                       | `src/app/state.rs`、`src/app/types.rs` |
 
-项目后续按独立项目维护，不再优先考虑 upstream merge。
-
-要求：
-
-- 不再为了兼容上游而保留不必要的补丁式结构。
-- 可以重构，但重构必须服务于当前阶段目标或已明确规划的后续功能。
-- 不做推倒重写。
-- 不一次性重构所有模块。
-- 每个阶段只解决一个主要问题。
-- 能用明确结构解决的问题，不引入复杂插件系统。
-- 不为了未来可能存在的功能提前设计大框架。
-- 每个阶段完成后，项目都应能正常编译和运行。
-
-### 1.2 重构边界
-
-本计划中的重构只服务于以下能力：
-
-- 终端引擎替换。
-- 顶部工具栏和底部面板。
-- 连接生命周期统一。
-- 独立文件传输窗口。
-- 隧道规则和本地端口转发。
-- 终端鼠标与 TUI 交互。
-
-不要借这些阶段顺手重写主题系统、配置系统、全部 UI 布局或整个 SSH/SFTP 实现。
-
-### 1.3 Codex 执行原则
-
-每个阶段交给 Codex 执行时，应要求：
-
-- 先阅读 `docs/code-map.md`。
-- 先确认当前文件位置和关键符号，再修改。
-- 修改涉及文件、函数、回调、结构体、枚举、trait、模块、Slint 组件、UI 属性或跨文件依赖时，同步更新 `docs/code-map.md`。
-- 不顺手重构无关代码。
-- 不删除已有功能。
-- 不改动与当前阶段无关的 UI 样式和业务逻辑。
-- 不提前实现后续阶段功能。
-- 每个阶段完成后运行：
-  - `cargo fmt`
-  - `cargo check`
-  - 如已有测试或本阶段影响已有测试，则运行 `cargo test`
-
-每个阶段完成后，Codex 应输出：
-
-1. 改了哪些文件。
-2. 为什么改这些文件。
-3. 哪些功能故意没有做。
-4. `cargo fmt` / `cargo check` / `cargo test` 结果。
-5. 必要的手动测试建议。
-
-### 1.4 阶段划分方式
-
-本计划分为 10 个阶段：
-
-- 阶段 0：同步独立维护规则
-- 阶段 1：基线整理与最小 App 分层
-- 阶段 2：顶部工具栏与底部面板骨架
-- 阶段 3：连接生命周期统一入口
-- 阶段 4：终端类型与 Legacy 引擎边界
-- 阶段 5：接入 `alacritty_terminal` 的实验终端引擎
-- 阶段 6：终端鼠标与 TUI 交互增强
-- 阶段 7：独立文件传输窗口第一版
-- 阶段 8：隧道规则与本地端口转发第一版
-- 阶段 9：配置、错误提示、文档与体验收尾
+6. 本轮暂不迁移 Serial / Telnet，除非某个上游修复必须依赖它们。
+7. 本轮字体观感只回归 main 的主题/字体设置能力，不做 Alacritty 字距、行高、字体 fallback 的大重构。
 
 ---
 
-# 阶段 0：同步独立维护规则
+# step-001：建立 dev 基线并确认差异范围
 
 ## 目标
 
-把仓库内原先的 fork/upstream sync 约束改为独立维护约束，避免后续 Codex 执行计划时仍被“兼容上游”目标误导。
+确认当前 dev 可以作为开发基线，明确禁止整体覆盖模块化结构。
 
-## 不做什么
+## 修改文件
 
-本阶段不做：
+不修改业务代码。只允许新增临时记录或测试日志，最终不要提交临时文件。
 
-- 不改业务代码。
-- 不改 UI。
-- 不改 SSH/SFTP/终端逻辑。
-- 不新增功能。
+## 执行
 
-## 建议修改文件
+在 dev 根目录执行：
 
-```text
-AGENTS.md
+```bash
+cargo fmt
+cargo check
 ```
 
-## 具体任务
+如果当前 dev 已经无法通过 `cargo check`，先记录错误，不要在本 step 大规模修复；后续 step 修复对应问题。
 
-# 阶段 1：基线整理与最小 App 分层
+## 验收
 
-## 目标
-
-降低 `src/app.rs` 的继续膨胀风险，但不进行大规模架构重写。
-
-当前 `src/app.rs` 同时承担 UI 状态机、tabs、terminals、SFTP 状态、终端渲染、搜索、选区、拖拽、侧边栏刷新和 Slint 回调路由等职责。第一阶段只做“最小分层入口”，不改变现有功能行为。
-
-## 不做什么
-
-本阶段不做：
-
-- 不接入 `alacritty_terminal`。
-- 不改 SSH 连接模型。
-- 不改 SFTP 行为。
-- 不新增顶部工具栏。
-- 不新增文件传输窗口。
-- 不改终端渲染逻辑。
-- 不抽复杂 action/reducer 系统。
-- 不把 sessions、tabs、terminals 全部塞进新的 AppState。
-
-## 建议新增文件
-
-```text
-src/app_state.rs
-```
-
-如后续确实需要，可再增加：
-
-```text
-src/app_actions.rs
-src/app_layout.rs
-```
-
-但第一版不建议一次性引入多个空抽象文件。
-
-## 具体任务
-
-### 任务 1.1：抽出最小 AppState
-
-把 `src/app.rs` 中与阶段 2 直接相关的简单 UI 状态抽成 `AppState`。
-
-建议只抽：
-
-```rust
-pub struct AppState {
-    pub sidebar_visible: bool,
-    pub bottom_panel_visible: bool,
-    pub bottom_panel_tab: BottomPanelTab,
-}
-
-pub enum BottomPanelTab {
-    Files,
-    Tunnels,
-}
-```
-
-### 任务 1.2：暂不强行抽复杂 AppAction
-
-如果阶段 1 没有真实 action 分发逻辑，可以暂不新增 `AppAction`。
-
-如需要提前为阶段 2 铺路，只允许定义最小动作：
-
-```rust
-pub enum AppAction {
-    ToggleSidebar,
-    ToggleBottomPanel,
-    SelectBottomPanelTab(BottomPanelTab),
-}
-```
-
-不要提前加入连接、文件传输、隧道相关 action。
-
-### 任务 1.3：保持现有功能不变
-
-本阶段只允许小范围替换状态读写位置，不允许改变现有 UI 行为。
-
-## 验收标准
-
-- `cargo fmt` 通过。
-- `cargo check` 通过。
-- 原有 SSH 连接、新建 tab、关闭 tab、SFTP 面板、终端输入输出仍可使用。
-- `docs/code-map.md` 已更新新增文件和职责。
-
-## Codex 提示词建议
-
-```text
-请执行阶段 1：基线整理与最小 App 分层。
-要求：
-1. 先阅读 docs/code-map.md。
-2. 只抽出最小 AppState，字段限于 sidebar_visible、bottom_panel_visible、bottom_panel_tab。
-3. 不要大规模搬迁 app.rs。
-4. 不改变现有终端、SSH、SFTP 行为。
-5. 不提前实现工具栏、连接管理、终端引擎重构。
-6. 完成后更新 docs/code-map.md。
-7. 运行 cargo fmt 和 cargo check。
-```
+- 明确当前项目入口是 `src/app/mod.rs`。
+- 明确 `meatshell_main/src/app.rs` 只作为迁移参考。
+- 不删除 dev 的 `src/app/` 目录。
+- 不用 main 的 `src/app.rs` 覆盖 dev。
 
 ---
 
-# 阶段 2：顶部工具栏与底部面板骨架
+# step-002：回归上游依赖项，支持主题、字体和 Wayland 剪贴板
+
+## 类型
+
+上游功能回归。
 
 ## 目标
 
-先完成可见 UI 外壳：
+把 main 中主题、系统字体枚举、Wayland 剪贴板所需依赖迁移到 dev。
 
-- 标签页上方新增工具栏。
-- 工具栏包含第一批固定按钮。
-- 下方文件栏改成 tab 骨架，包含“文件”和“隧道”。
-- “文件”页签继续承载现有 SFTP 面板。
-- “隧道”页签先只显示空状态。
+## 修改文件
 
-## 不做什么
+- `Cargo.toml`
 
-本阶段不做：
+## 代码来源
 
-- 不实现隧道转发。
-- 不实现文件传输独立窗口功能。
-- 不接入 `alacritty_terminal`。
-- 不大改 SFTP 内部逻辑。
-- 不为了重连按钮临时实现复杂重连流程。
+参考：
 
-## 建议新增文件
+- `meatshell_main/Cargo.toml`
 
-```text
-ui/top_action_bar.slint
-ui/bottom_panel.slint
-ui/tunnel_panel.slint
+## 执行
+
+在 dev 的 `Cargo.toml` 中迁移以下依赖。注意：不要迁移 Serial / Telnet 相关依赖，除非后续明确实现 Serial / Telnet。
+
+需要添加到 `[dependencies]`：
+
+```toml
+# Enumerate installed system fonts for the Interface (font) settings picker.
+fontdb = "0.16"
+
+# Detect whether the OS is running in dark or light mode.
+# Used on startup to honour the system preference before the user overrides it.
+dark-light = "1"
 ```
 
-## 具体任务
+Linux 下 `arboard` 需要使用 Wayland feature。dev 当前已有 `arboard = "3"`，保留基础依赖，并增加 target-specific 配置：
 
-### 任务 2.1：新增顶部工具栏 UI
-
-工具栏按钮固定为：
-
-1. 展开/折叠侧边栏
-2. 展开/折叠下方文件栏
-3. 断开当前连接
-4. 重连当前连接
-5. 新建文件传输
-
-按钮先使用现有 `IconButton` 或 `GhostButton` 风格，不新增复杂设计系统。
-
-### 任务 2.2：绑定工具栏回调
-
-在 `ui/app.slint` 中新增必要 callback，在 `src/app.rs` 中绑定：
-
-```text
-toggle-sidebar
-toggle-bottom-panel
-disconnect-active-tab
-reconnect-active-tab
-open-transfer-window
+```toml
+[target.'cfg(target_os = "linux")'.dependencies]
+# Native Wayland clipboard (wlr-data-control protocol) so copy/paste works on
+# Wayland sessions without relying on XWayland.
+arboard = { version = "3", features = ["wayland-data-control"] }
 ```
 
-第一版行为：
+如果 Cargo 提示同一个 target 下重复声明 `arboard` 冲突，优先采用 main 的写法。
 
-- 侧边栏展开/折叠：真实生效。
-- 底部面板展开/折叠：真实生效。
-- 断开当前连接：优先复用现有断开逻辑。
-- 重连当前连接：如果已有明确重连逻辑则复用；如果没有，先显示占位提示或 disabled，不为它临时引入复杂连接生命周期。
-- 新建文件传输：先显示占位提示或日志，真实功能放到阶段 7。
+## 不迁移
 
-### 任务 2.3：底部面板 tab 化
+本 step 不迁移：
 
-新增 `BottomPanel`：
-
-```text
-BottomPanel
-  - Files tab: existing SftpPanel
-  - Tunnels tab: TunnelPanel empty state
+```toml
+serialport = "4"
+chacha20poly1305 = "0.10"
+image = { ... }
 ```
 
-要求现有 SFTP 功能不退化。
+除非后续 step 明确需要。
 
-## 验收标准
+## 验收
 
-- 顶部工具栏显示在 tab 栏下方或终端区域上方。
-- 侧边栏按钮可切换显示状态。
-- 底部面板按钮可切换显示状态。
-- 底部面板有“文件”和“隧道”两个页签。
-- “文件”页签保留现有 SFTP 功能。
-- “隧道”页签显示占位提示。
-- “重连”和“新建文件传输”未完整实现时，有明确占位提示或 disabled 状态。
-- `cargo fmt`、`cargo check` 通过。
-- `docs/code-map.md` 已更新。
-
-## Codex 提示词建议
-
-```text
-请执行阶段 2：顶部工具栏与底部面板骨架。
-要求：
-1. 先阅读 docs/code-map.md。
-2. 新增 top_action_bar.slint、bottom_panel.slint、tunnel_panel.slint。
-3. 工具栏按钮固定，不要设计可配置工具栏。
-4. 底部面板只做“文件/隧道”两个 tab。
-5. 文件 tab 继续使用现有 SFTP 面板。
-6. 不实现真实隧道和文件传输窗口。
-7. 如果没有现成重连逻辑，重连按钮先做占位提示或 disabled，不要临时大改连接逻辑。
-8. 更新 docs/code-map.md。
-9. 运行 cargo fmt 和 cargo check。
+```bash
+cargo check
 ```
+
+通过或只剩下后续 step 预期内的未使用/未接线错误。
 
 ---
 
-# 阶段 3：连接生命周期统一入口
+# step-003：回归上游配置字段：主题、终端字体、会话分组
+
+## 类型
+
+上游功能回归。
 
 ## 目标
 
-在不大改 SSH 实现细节的前提下，引入一个最小的连接管理入口，为后续断开/重连、文件传输、隧道状态展示做准备。
+让 dev 的配置层支持 main 已有的：
 
-本阶段不是要把所有 SSH channel 全部重写，也不是实现复杂连接池，而是先把“连接、断开、重连、状态”收敛到一个位置。
+- `theme_pref`
+- `font_family`
+- `font_size`
+- `Session.group`
 
-## 不做什么
+这是后续主题字体设置、会话分组的基础。
 
-本阶段不做：
+## 修改文件
 
-- 不强制 SFTP 立即复用终端 SSH 连接。
-- 不实现隧道。
-- 不实现复杂连接池。
-- 不做多路复用大重构。
-- 不改变认证方式。
-- 不引入泛型化连接框架。
+- `src/config.rs`
 
-## 建议新增文件
+## 代码来源
 
-```text
-src/connection.rs
-```
+参考：
 
-## 具体任务
+- `meatshell_main/src/config.rs`
 
-### 任务 3.1：定义 ConnectionStatus
+## 执行
 
-定义简单状态：
+### 1. 给 `Session` 增加 `group`
+
+在 dev 的 `Session` 结构体中，`proxy` 后或 `last_used` 前增加：
 
 ```rust
-pub enum ConnectionStatus {
-    Disconnected,
-    Connecting,
-    Connected,
-    Reconnecting,
-    Failed(String),
-}
+/// Optional folder/group name to organize sessions in the list.
+/// Empty = ungrouped. Sessions are grouped by this in Quick Connect.
+#[serde(default)]
+pub group: String,
 ```
 
-这个状态后续给 tab、顶部工具栏、文件传输窗口、隧道面板复用。
-
-### 任务 3.2：定义最小 SessionRuntime / ConnectionManager
-
-建议第一版使用较直接的结构，例如：
+在 `Session::new_empty()` 中增加默认值：
 
 ```rust
-pub struct SessionRuntime {
-    pub session_id: String,
-    pub status: ConnectionStatus,
-    // 包装或记录现有 ssh::SessionHandle 等运行态信息
+group: String::new(),
+```
+
+### 2. 给 `ConfigFile` 增加主题和字体字段
+
+在 dev 的 `ConfigFile` 中增加：
+
+```rust
+/// Theme preference: "system" (default) | "dark" | "light".
+#[serde(default)]
+pub theme_pref: String,
+/// Terminal font family. Empty = the built-in default (Cascadia Mono).
+#[serde(default)]
+pub font_family: String,
+/// Terminal font size in px. 0 = the built-in default.
+#[serde(default)]
+pub font_size: u32,
+```
+
+### 3. 给 `ConfigStore` 增加访问方法
+
+从 main 迁移以下方法到 dev 的 `impl ConfigStore`：
+
+```rust
+/// Theme preference: "system" (default) | "dark" | "light".
+pub fn theme_pref(&self) -> &str {
+    if self.cache.theme_pref.is_empty() {
+        "system"
+    } else {
+        &self.cache.theme_pref
+    }
 }
 
-pub struct ConnectionManager {
-    // 管理 session_id -> SessionRuntime
+pub fn set_theme_pref(&mut self, pref: String) {
+    self.cache.theme_pref = pref;
+}
+
+/// Terminal font family ("" = built-in default).
+pub fn font_family(&self) -> &str {
+    &self.cache.font_family
+}
+
+pub fn set_font_family(&mut self, family: String) {
+    self.cache.font_family = family;
+}
+
+/// Terminal font size in px (falls back to 13 when unset).
+pub fn font_size(&self) -> u32 {
+    if self.cache.font_size == 0 {
+        13
+    } else {
+        self.cache.font_size
+    }
+}
+
+pub fn set_font_size(&mut self, size: u32) {
+    self.cache.font_size = size.clamp(8, 32);
 }
 ```
 
-第一版只包装现有 `ssh::spawn_session(...)` 和已有 handle，不重写底层 SSH。
+## 注意事项
 
-### 任务 3.3：统一断开 / 重连入口
+- 必须使用 `#[serde(default)]`，否则旧配置文件会反序列化失败。
+- 不要改变现有 `terminal_engine` 配置。
+- 不要删除 dev 已有的 `TerminalEngineMode` 支持。
 
-把阶段 2 工具栏中的断开/重连行为接到 `ConnectionManager`。
+## 验收
 
-如果重连需要依赖原始 session 配置，则只用现有配置重新打开，不引入复杂恢复系统。
-
-## 验收标准
-
-- 原有 SSH 连接可用。
-- 顶部工具栏断开行为可用。
-- 顶部工具栏重连行为有统一入口；如果功能尚不完善，应清晰显示失败或占位，而不是静默无效。
-- tab 状态没有明显退化。
-- 没有引入复杂连接池或泛型抽象。
-- `cargo fmt`、`cargo check` 通过。
-- `docs/code-map.md` 已更新。
-
-## Codex 提示词建议
-
-```text
-请执行阶段 3：连接生命周期统一入口。
-要求：
-1. 先阅读 docs/code-map.md。
-2. 新增最小 connection.rs。
-3. 定义 ConnectionStatus。
-4. 定义最小 SessionRuntime / ConnectionManager，只包装现有 ssh::spawn_session 和 handle。
-5. 只改断开、重连、状态入口。
-6. 不重写 SSH 底层，不实现复杂连接池，不强制 SFTP 复用终端连接。
-7. 更新 docs/code-map.md。
-8. 运行 cargo fmt 和 cargo check。
-```
+- 旧 `sessions.json` 能正常加载。
+- 新字段缺省时不会崩溃。
+- `cargo check` 不因字段缺失失败。
 
 ---
 
-# 阶段 4：终端类型与 Legacy 引擎边界
+# step-004：回归上游主题和终端字体设置的 Rust 接线
+
+## 类型
+
+上游功能回归。
 
 ## 目标
 
-为后续接入 `alacritty_terminal` 做准备，但本阶段不改变终端行为。
+把 main 中主题模式、终端字体、终端字号的初始化和保存逻辑迁移到 dev。
 
-本阶段把现有终端相关数据类型和 Legacy 终端解析逻辑从 `src/app.rs` 中逐步抽出，让 UI 层和终端解析逻辑之间有明确边界。
+## 修改文件
 
-## 不做什么
+- `src/app/mod.rs`
 
-本阶段不做：
+## 代码来源
 
-- 不引入 `alacritty_terminal` 依赖。
-- 不改变终端渲染模型字段的语义。
-- 不重写搜索、选区、复制逻辑。
-- 不重写键盘输入映射。
-- 不改变终端显示行为。
+参考：
 
-## 建议新增文件
+- `meatshell_main/src/app.rs` 中窗口创建后的主题/字体初始化逻辑
+- `meatshell_main/src/app.rs` 中 `system_monospace_fonts()`
 
-```text
-src/terminal_types.rs
-src/terminal_engine.rs
-```
+## 执行
 
-如一次性抽两个文件改动过大，可以先新增 `src/terminal_types.rs`，再新增 `src/terminal_engine.rs`。
+### 1. 在 `src/app/mod.rs` imports 中确认已有这些类型
 
-## 具体任务
-
-### 任务 4.1：抽出终端纯数据类型
-
-将 `BuiltScreen`、`Line`、`HistSpan` 等终端渲染数据类型从 `src/app.rs` 抽到 `src/terminal_types.rs`。
-
-要求：
-
-- 类型语义不变。
-- UI 渲染结果不变。
-- 搜索、选区、复制逻辑暂时可继续留在 `app.rs`。
-
-### 任务 4.2：抽出 LegacyTerminalEngine
-
-新增最小终端引擎边界：
+如果没有，需要补齐：
 
 ```rust
-pub trait TerminalEngine {
-    fn ingest(&mut self, bytes: &[u8]);
-    fn render(&self) -> BuiltScreen;
-    fn resize(&mut self, rows: usize, cols: usize);
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use std::rc::Rc;
+```
+
+`dev/src/app/mod.rs` 基本已有这些 import，避免重复导入。
+
+### 2. 在 `AppWindow::new()` 后、`sync_app_state_to_window` 前后合适位置加入主题初始化
+
+迁移 main 的逻辑：
+
+```rust
+// Apply the saved (or system-detected) theme.
+// "dark" / "light" → use that directly; "system" or unset → ask the OS;
+// OS unknown → fall back to dark.
+{
+    let is_dark = match store.borrow().theme_pref() {
+        "light" => false,
+        "dark" => true,
+        _ => match dark_light::detect() {
+            dark_light::Mode::Light => false,
+            dark_light::Mode::Dark => true,
+            dark_light::Mode::Default => true,
+        },
+    };
+    window.set_dark_mode(is_dark);
 }
 ```
 
-用现有 `TermBuffer` 包装：
+### 3. 加入字体初始化
 
 ```rust
-pub struct LegacyTerminalEngine {
-    buffer: TermBuffer,
+// Apply the saved terminal font. Empty family keeps the built-in default;
+// the size always applies and defaults to 13.
+{
+    let s = store.borrow();
+    let fam = s.font_family().to_string();
+    if !fam.is_empty() {
+        window.set_term_font_family(fam.into());
+    }
+    window.set_term_font_size(s.font_size() as f32);
+}
+
+window.set_term_fonts(ModelRc::from(Rc::new(VecModel::from(system_monospace_fonts()))));
+```
+
+### 4. 加入字体保存回调
+
+放在已有设置类回调附近，例如 `window.on_set_terminal_engine_mode(...)` 附近：
+
+```rust
+{
+    let weak = window.as_weak();
+    let store = store.clone();
+    window.on_set_term_font(move |family: SharedString| {
+        {
+            let mut s = store.borrow_mut();
+            s.set_font_family(family.to_string());
+            let _ = s.save();
+        }
+        if let Some(w) = weak.upgrade() {
+            w.set_term_font_family(family);
+        }
+    });
+}
+
+{
+    let weak = window.as_weak();
+    let store = store.clone();
+    window.on_set_term_font_size(move |size: i32| {
+        {
+            let mut s = store.borrow_mut();
+            s.set_font_size(size as u32);
+            let _ = s.save();
+        }
+        if let Some(w) = weak.upgrade() {
+            w.set_term_font_size(size as f32);
+        }
+    });
 }
 ```
 
-如果 `TermBuffer` 与 app.rs 耦合过深，本阶段允许先把 `TermBuffer` 移到 `terminal_engine.rs`，再逐步包装，不强行一次性完成所有 trait 化。
+### 5. 在 `src/app/mod.rs` 文件底部加入系统等宽字体扫描函数
 
-### 任务 4.3：替换最小使用点
-
-只把直接持有 `TermBuffer` 的地方替换为 `LegacyTerminalEngine` 或轻量 enum。
-
-不要一口气迁移所有搜索、选区、复制逻辑。如果这些逻辑强依赖 `TermBuffer` 内部结构，本阶段允许保留原结构，先只完成 ingest/render 边界。
-
-## 验收标准
-
-- 终端显示行为与改动前一致。
-- SSH 输出仍能正常显示。
-- 输入、复制、搜索、选区不退化。
-- `cargo fmt`、`cargo check` 通过。
-- `docs/code-map.md` 已更新。
-
-## Codex 提示词建议
-
-```text
-请执行阶段 4：终端类型与 Legacy 引擎边界。
-要求：
-1. 先阅读 docs/code-map.md。
-2. 先抽 terminal_types，再抽 terminal_engine。
-3. 用 LegacyTerminalEngine 包装现有 TermBuffer。
-4. 不接入 alacritty_terminal。
-5. 不改变终端现有功能行为。
-6. 不重写搜索、选区、复制。
-7. 如果 TermBuffer 耦合较深，允许分步迁移，不要硬改成复杂 trait 架构。
-8. 更新 docs/code-map.md。
-9. 运行 cargo fmt 和 cargo check。
-```
-
----
-
-# 阶段 5：接入 alacritty_terminal 的实验终端引擎
-
-## 目标
-
-新增一个实验性的 `AlacrittyTerminalEngine`，初步使用 `alacritty_terminal` 处理 VT/ANSI 解析和终端状态。
-
-本阶段目标是“能跑、能显示、可切换、可回退”，不是一次性达到完美终端模拟。
-
-## 不做什么
-
-本阶段不做：
-
-- 不删除 LegacyTerminalEngine。
-- 不默认强制启用 alacritty 引擎。
-- 不要求鼠标 TUI 完整可用。
-- 不要求所有颜色、选区、搜索完全一致。
-- 不重写 SSH 层。
-- 不把 alacritty 内部类型泄漏到 `app.rs` 或 Slint UI 模型。
-
-## 建议新增或修改文件
-
-```text
-Cargo.toml
-src/terminal_engine.rs
-```
-
-如果阶段 4 后文件已经较大，可拆为：
-
-```text
-src/terminal/mod.rs
-src/terminal/types.rs
-src/terminal/legacy.rs
-src/terminal/alacritty.rs
-src/terminal/adapter.rs
-```
-
-但只有当单文件已经明显不易维护时才拆目录。
-
-## 具体任务
-
-### 任务 5.1：添加依赖和特性开关
-
-在 `Cargo.toml` 中添加 `alacritty_terminal`。
-
-增加引擎模式：
+从 main 迁移：
 
 ```rust
-pub enum TerminalEngineMode {
-    Legacy,
-    AlacrittyExperimental,
+/// Enumerate installed monospace font families for the Interface font picker.
+/// Terminals want fixed-width fonts, so non-monospace families are filtered out.
+fn system_monospace_fonts() -> Vec<slint::SharedString> {
+    let mut db = fontdb::Database::new();
+    db.load_system_fonts();
+    let mut names: Vec<String> = db
+        .faces()
+        .filter(|f| f.monospaced)
+        .filter_map(|f| f.families.first().map(|(n, _)| n.clone()))
+        .collect();
+    names.sort();
+    names.dedup();
+    names.into_iter().map(slint::SharedString::from).collect()
 }
 ```
 
-初期可以通过常量、环境变量或配置项控制，不要做复杂 UI 设置页。
+## 注意事项
 
-### 任务 5.2：实现 AlacrittyTerminalEngine 的基本 ingest/render
+- 如果 `window.set_dark_mode`、`window.set_term_font_family`、`window.set_term_font_size`、`window.set_term_fonts` 尚不存在，先完成 step-005 的 Slint 属性，再回到本 step。
+- dev 已有 `terminal_engine_mode`，不要覆盖。
 
-至少支持：
+## 验收
 
-- 接收 SSH 输出 bytes。
-- 解析 ANSI/VT 序列。
-- 转换为当前 Slint 可用的 `BuiltScreen` 或等价渲染模型。
-- 支持 resize。
-
-建议单独保留转换层，例如：
-
-```rust
-AlacrittyScreenAdapter
-```
-
-不要让 UI 层直接依赖 alacritty 内部 grid/cell 类型。
-
-### 任务 5.3：保留回退能力
-
-如果 alacritty 引擎出错，应可以切回 legacy 引擎。
-
-第一版不要求运行时无缝切换，可以在启动前选择。
-
-## 验收标准
-
-- Legacy 引擎仍然可用。
-- Alacritty 实验引擎能显示普通 shell 输出。
-- bash、zsh、PowerShell 基本输出不乱码。
-- `cargo fmt`、`cargo check` 通过。
-- `docs/code-map.md` 已更新。
-
-建议手测：
-
-```text
-普通输出：
-- echo hello
-- ls / dir
-- clear
-- 长行自动换行
-- 中文 / emoji / 宽字符
-
-颜色：
-- 彩色 ls
-- 256 色
-- bold / underline / inverse
-
-屏幕控制：
-- top / htop
-- vim / nano
-- less
-- tmux
-
-Shell：
-- bash
-- zsh
-- PowerShell
-
-Resize：
-- 改变窗口大小后不崩溃
-- TUI 应用 resize 后刷新正常
-
-回退：
-- 环境变量或配置切回 Legacy 后功能正常
-```
-
-## Codex 提示词建议
-
-```text
-请执行阶段 5：接入 alacritty_terminal 的实验终端引擎。
-要求：
-1. 先阅读 docs/code-map.md。
-2. 保留 LegacyTerminalEngine，不要删除旧实现。
-3. 新增 AlacrittyTerminalEngine。
-4. 新增或保持清晰的 AlacrittyScreenAdapter，不要把 alacritty 内部类型泄漏到 app.rs / Slint UI。
-5. 初期只要求基本显示、resize、普通输入输出可用。
-6. 不实现完整鼠标交互。
-7. 不大改 SSH/SFTP 模块。
-8. 更新 docs/code-map.md。
-9. 运行 cargo fmt 和 cargo check。
-10. 给出 echo、ls/dir、clear、中文、PowerShell、top/htop、vim/nano、resize 的手测建议。
-```
+- `cargo check` 不再提示对应 Slint 方法不存在。
+- 启动后能读取配置中的主题和字体。
+- 修改字体后配置能保存。
 
 ---
 
-# 阶段 6：终端鼠标与 TUI 交互增强
+# step-005：回归上游 Slint 主题字体属性和设置界面
+
+## 类型
+
+上游功能回归。
 
 ## 目标
 
-在阶段 5 的 `AlacrittyTerminalEngine` 基础上增强鼠标交互，使 `htop`、`vim`、`tmux`、`less`、`nano` 等 TUI 应用体验更接近主流终端。
+让 UI 层支持可配置终端字体和字号，并把 legacy / Alacritty 终端都接到同一套主题字体属性上。
 
-## 不做什么
+## 修改文件
 
-本阶段不做：
+- `ui/theme.slint`
+- `ui/app.slint`
+- `ui/terminal_view.slint`
 
-- 不重写文件传输。
-- 不改隧道逻辑。
-- 不新增复杂主题系统。
-- 不要求一次性覆盖所有 xterm mouse mode。
-- 不破坏普通文本选择。
+## 代码来源
 
-## 建议修改文件
+参考：
 
-```text
-src/terminal_engine.rs
-ui/terminal_view.slint
-src/app.rs
+- `meatshell_main/ui/theme.slint`
+- `meatshell_main/ui/app.slint`
+- `meatshell_main/ui/terminal_view.slint`
+
+## 执行
+
+### 1. 在 `ui/theme.slint` 中加入终端字体属性
+
+从 main 迁移：
+
+```slint
+// Terminal font — user-configurable via Interface settings, set by Rust
+// from the config on startup. cell size in terminal_view derives from these.
+in-out property <string> term-font-family: "Cascadia Mono";
+in-out property <length> term-font-size: 13px;
 ```
 
-如果已有 `src/terminal/` 目录，则相应修改：
+### 2. 在 `ui/app.slint` 的 `AppWindow` 根组件属性区加入
 
-```text
-src/terminal/mouse.rs
-src/terminal/input.rs
+```slint
+in-out property <string> term-font-family <=> Theme.term-font-family;
+in-out property <length> term-font-size <=> Theme.term-font-size;
+in property <[string]> term-fonts;
+callback set-term-font(string);
+callback set-term-font-size(int);
 ```
 
-## 具体任务
+### 3. 在设置菜单中增加字体选择和字号设置
 
-### 任务 6.1：把鼠标坐标映射为终端 row/col
+dev 当前 settings popup 比 main 简化。可以先采用最小实现：在 `ui/app.slint` 的 Settings menu popup 内增加一个二级区域，放在 terminal engine 行后、about 行前。
 
-在 `TerminalView` 中把鼠标位置转换为：
+建议 UI 先做简单可用版本：
 
-```text
-terminal_col
-terminal_row
-```
+```slint
+Rectangle { height: 1px; background: Theme.border-subtle; }
 
-注意行列从 1 还是从 0 开始，最终发送到远端时要符合 xterm mouse 协议。
+Text {
+    text: root.lang-en ? "Terminal font" : "终端字体";
+    color: Theme.text-secondary;
+    font-size: Theme.fs-xs;
+}
 
-### 任务 6.2：支持基础 SGR Mouse Mode
+ComboBox {
+    height: 28px;
+    model: root.term-fonts;
+    current-value: root.term-font-family;
+    selected(v) => { root.set-term-font(v); }
+}
 
-优先支持：
-
-- 左键按下
-- 左键释放
-- 滚轮上
-- 滚轮下
-
-输出类似：
-
-```text
-ESC [ < button ; col ; row M
-ESC [ < button ; col ; row m
-```
-
-### 任务 6.3：处理应用是否开启鼠标模式
-
-只有远端程序开启 mouse reporting mode 时才发送鼠标序列。
-
-如果当前引擎可以识别 mouse mode，则按状态发送；如果暂时识别困难，可以先做实验开关，但默认不能破坏普通文本选择。
-
-## 验收标准
-
-- 普通终端文本选择不明显退化。
-- `htop` 中鼠标点击或滚轮基本可用。
-- `vim` / `tmux` 中鼠标行为不造成明显乱码。
-- `less` / `nano` 中鼠标或滚轮不造成明显异常。
-- Legacy 引擎仍可使用。
-- `cargo fmt`、`cargo check` 通过。
-- `docs/code-map.md` 已更新。
-
-## Codex 提示词建议
-
-```text
-请执行阶段 6：终端鼠标与 TUI 交互增强。
-要求：
-1. 先阅读 docs/code-map.md。
-2. 基于阶段 5 的 AlacrittyTerminalEngine 增强鼠标输入。
-3. 优先支持 SGR Mouse Mode 的左键、释放、滚轮。
-4. 只有应用开启 mouse reporting mode 时才发送鼠标序列；无法判断时默认不要破坏普通文本选择。
-5. Legacy 引擎必须仍可用。
-6. 更新 docs/code-map.md。
-7. 运行 cargo fmt 和 cargo check。
-8. 给出 htop、vim、tmux、less、nano 的手测建议。
-```
-
----
-
-# 阶段 7：独立文件传输窗口第一版
-
-## 目标
-
-实现“新建文件传输”按钮的真实功能：打开独立窗口，左侧显示本机文件，右侧显示当前远程会话文件列表。
-
-第一版重点是可用，不追求完整 Xftp。
-
-## 不做什么
-
-本阶段不做：
-
-- 不实现断点续传。
-- 不实现复杂传输队列。
-- 不实现本地收藏夹。
-- 不实现远程站点管理。
-- 不实现远程多会话批量管理。
-- 不强制和当前终端共享同一条 SSH transport。
-- 不让文件传输窗口关闭影响主终端。
-
-## 建议新增文件
-
-```text
-src/file_transfer.rs
-ui/transfer_window.slint
-ui/local_file_panel.slint
-ui/remote_file_panel.slint
-```
-
-## 具体任务
-
-### 任务 7.1：新增 TransferWindow
-
-窗口布局：
-
-```text
-TransferWindow
-  左侧：LocalFilePanel
-  右侧：RemoteFilePanel / Remote tab
-```
-
-第一版可以只支持一个远程 tab，但数据结构应允许后续多个 remote tab。
-
-### 任务 7.2：实现本机文件列表
-
-用 `std::fs::read_dir` 实现最小本机目录浏览：
-
-- 显示文件名。
-- 显示目录/文件类型。
-- 支持进入目录。
-- 支持返回上级目录。
-
-### 任务 7.3：包装或复用现有 SFTP 能力
-
-右侧远程文件面板优先复用现有 `src/sftp.rs` 的列表、上传、下载、删除能力。
-
-如果 `sftp.rs` 与主窗口 SFTP 面板耦合较深，先增加一个薄 wrapper，例如：
-
-```rust
-pub struct TransferSftpClient {
-    // wraps existing SftpHandle or equivalent command channel
+HorizontalLayout {
+    height: 28px;
+    spacing: 8px;
+    Text {
+        text: root.lang-en ? "Font size" : "字号";
+        color: Theme.text-primary;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+    }
+    SpinBox {
+        minimum: 8;
+        maximum: 32;
+        value: root.term-font-size / 1px;
+        edited(v) => { root.set-term-font-size(v); }
+    }
+    Text {
+        text: (root.term-font-size / 1px) + " px";
+        color: Theme.text-muted;
+        font-size: Theme.fs-xs;
+        vertical-alignment: center;
+    }
 }
 ```
 
-不要把主窗口 SFTP 面板状态和文件传输窗口状态揉在一起。
+如果 Slint 版本没有 `ComboBox` 或 `SpinBox`，则参考 main 的完整 `ui/app.slint` 中 Interface settings 实现，不要重新设计复杂控件。
 
-第一版可只实现：
+### 4. 修改 `ui/terminal_view.slint`
 
-- 列目录。
-- 进入目录。
-- 返回上级目录。
-- 下载远程文件到当前本地目录。
-- 上传本地文件到当前远程目录。
+把终端文字使用的固定字体和固定字号替换为：
 
-### 任务 7.4：主窗口按钮打开文件传输窗口
-
-点击顶部工具栏“新建文件传输”：
-
-- 如果当前有 active terminal session，则打开 TransferWindow 并连接当前远程。
-- 如果没有 active session，则显示提示，不崩溃。
-
-## 验收标准
-
-- 点击“新建文件传输”能打开独立窗口。
-- 左侧能浏览本机目录。
-- 右侧能浏览当前 SSH session 的远程目录。
-- 至少支持基本上传和下载。
-- 关闭文件传输窗口不影响主终端。
-- `cargo fmt`、`cargo check` 通过。
-- `docs/code-map.md` 已更新。
-
-## Codex 提示词建议
-
-```text
-请执行阶段 7：独立文件传输窗口第一版。
-要求：
-1. 先阅读 docs/code-map.md。
-2. 新增 transfer_window.slint、local_file_panel.slint、remote_file_panel.slint、src/file_transfer.rs。
-3. 左侧本地文件用 std::fs::read_dir 实现。
-4. 右侧优先复用现有 sftp.rs；如果耦合较深，先做 TransferSftpClient 薄封装。
-5. 第一版只做基本浏览、上传、下载。
-6. 不实现复杂传输队列和断点续传。
-7. 关闭文件传输窗口不能影响主终端。
-8. 更新 docs/code-map.md。
-9. 运行 cargo fmt 和 cargo check。
+```slint
+font-family: Theme.term-font-family;
+font-size: Theme.term-font-size;
 ```
+
+涉及 terminal 文本、cursor/cell 计算等位置时，要确保 cell width/height 跟 `Theme.term-font-size` 同步。
+
+## 验收
+
+- 设置中能看到终端字体和字号入口。
+- 修改字体/字号后，当前或新建终端能看到变化。
+- 重启后字体/字号仍然生效。
+- Alacritty 模式不再使用明显偏小的硬编码字号。
 
 ---
 
-# 阶段 8：隧道规则与本地端口转发第一版
+# step-006：回归上游 SFTP 递归上传、递归下载、递归删除
+
+## 类型
+
+上游功能回归。
 
 ## 目标
 
-实现下方“隧道”页签的第一版可用功能：
+把 main 已实现的文件夹递归传输能力迁移到 dev。后续文件传输窗口也复用这套能力。
 
-- 支持 Local Forward。
-- 规则和当前 session 关联。
-- 连接 session 后自动启动 enabled 的规则。
-- 隧道失败不影响主终端连接。
+## 修改文件
 
-本阶段建议分为两个子阶段：
+- `src/sftp.rs`
+- `src/app/sftp_panel.rs`
+- `src/app/transfer.rs`
 
-- 阶段 8A：Tunnel Core
-- 阶段 8B：TunnelPanel + 持久化 + 自动启动
+## 代码来源
 
-## 不做什么
+参考：
 
-本阶段不做：
+- `meatshell_main/src/sftp.rs`
 
-- 不做 Remote Forward。
-- 不做 Dynamic SOCKS。
-- 不做复杂跳板链。
-- 不做全局规则模板。
-- 不强制复用当前终端 SSH transport。
-- 不做复杂隧道编排系统。
+重点代码范围：
 
-## 建议新增文件
+- `SftpCommand::Download` 分支：main `src/sftp.rs` 约第 344-389 行
+- `SftpCommand::Upload` 分支：main `src/sftp.rs` 约第 391-443 行
+- `SftpCommand::Delete` 分支：main `src/sftp.rs` 约第 445-480 行
+- `sanitize_filename()`：main `src/sftp.rs` 约第 592 行开始
+- `download_dir()`：main `src/sftp.rs` 约第 799 行开始
+- `remove_dir_recursive()`：main `src/sftp.rs` 约第 834 行开始
+- `upload_dir()`：main `src/sftp.rs` 约第 864 行开始
+- `upload_pipelined()`：main `src/sftp.rs` 约第 901 行开始
 
-```text
-src/tunnel.rs
-ui/tunnel_rule_dialog.slint
-```
+## 执行
 
-如果阶段 2 的 `ui/tunnel_panel.slint` 已存在，本阶段扩展它。
+### 1. 迁移 Download 分支目录判断
 
-## 阶段 8A：Tunnel Core
-
-### 任务 8A.1：定义 TunnelRule
-
-第一版结构：
+把 dev `SftpCommand::Download { remote, local_dir }` 的处理逻辑改为 main 的目录优先逻辑：
 
 ```rust
-pub struct TunnelRule {
+let is_dir = sftp
+    .metadata(&remote)
+    .await
+    .ok()
+    .map(|m| (m.permissions.unwrap_or(0) & 0o170_000) == 0o040_000)
+    .unwrap_or(false);
+
+if is_dir {
+    let dirname = base_name(&remote);
+    let _ = events.send(SessionEvent::SftpStatus(format!(
+        "{} {}/...", t("下载文件夹", "Downloading folder"), dirname
+    )));
+    match download_dir(&sftp, &remote, &local_dir, &events).await {
+        Ok(_) => {
+            let _ = events.send(SessionEvent::SftpStatus(format!(
+                "{}: {}", t("下载完成", "Downloaded"), dirname
+            )));
+        }
+        Err(e) => {
+            let _ = events.send(SessionEvent::SftpStatus(format!(
+                "{}: {e}", t("下载失败", "Download failed")
+            )));
+        }
+    }
+} else {
+    let filename = sanitize_filename(&base_name(&remote));
+    let local_path = format!("{}/{}", local_dir.trim_end_matches('/'), filename);
+    let id = Uuid::new_v4().to_string();
+    match download_impl(&sftp, &remote, &local_path, &filename, &id, &events).await {
+        Ok(_) => {
+            let _ = events.send(SessionEvent::SftpStatus(format!(
+                "{}: {}", t("下载完成", "Downloaded"), filename
+            )));
+        }
+        Err(e) => {
+            emit_transfer(&events, &id, &filename, false, 0, 0, 2, &e.to_string());
+            let _ = events.send(SessionEvent::SftpStatus(format!(
+                "{}: {e}", t("下载失败", "Download failed")
+            )));
+        }
+    }
+}
+```
+
+### 2. 迁移 Upload 分支目录判断
+
+核心逻辑：
+
+```rust
+let is_dir = tokio::fs::metadata(&local)
+    .await
+    .map(|m| m.is_dir())
+    .unwrap_or(false);
+
+if is_dir {
+    let dirname = base_name(&local);
+    let res = upload_dir(&handle, &sftp, &local, &remote_dir, &events).await;
+    if let Ok(entries) = list_dir_impl(&sftp, &remote_dir).await {
+        let _ = events.send(SessionEvent::SftpEntries {
+            path: remote_dir.clone(),
+            entries,
+        });
+    }
+    match res {
+        Ok(_) => {
+            let _ = events.send(SessionEvent::SftpStatus(format!(
+                "{}: {}", t("上传完成", "Uploaded"), dirname
+            )));
+        }
+        Err(e) => {
+            let _ = events.send(SessionEvent::SftpStatus(format!(
+                "{}: {e}", t("上传失败", "Upload failed")
+            )));
+        }
+    }
+} else {
+    // 单文件上传继续使用 upload_pipelined
+}
+```
+
+### 3. 迁移 Delete 分支递归删除
+
+核心逻辑：
+
+```rust
+let is_dir = sftp
+    .metadata(&path)
+    .await
+    .ok()
+    .map(|m| (m.permissions.unwrap_or(0) & 0o170_000) == 0o040_000)
+    .unwrap_or(false);
+
+let res: Result<()> = if is_dir {
+    remove_dir_recursive(&sftp, &path).await
+} else {
+    sftp.remove_file(&path)
+        .await
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("{e}"))
+};
+```
+
+### 4. 从 main 原样复制辅助函数
+
+从 `meatshell_main/src/sftp.rs` 原样复制以下函数到 dev 的 `src/sftp.rs`：
+
+```rust
+fn sanitize_filename(name: &str) -> String { ... }
+async fn download_dir(...) -> Result<()> { ... }
+async fn remove_dir_recursive(...) -> Result<()> { ... }
+async fn upload_dir(...) -> Result<()> { ... }
+async fn upload_pipelined(...) -> Result<()> { ... }
+```
+
+不要重写逻辑。复制后只做必要 import 适配。
+
+### 5. 检查 imports
+
+确保 `src/sftp.rs` 中包含：
+
+```rust
+use anyhow::{anyhow, Context, Result};
+use futures::stream::{FuturesUnordered, StreamExt};
+use russh_sftp::client::{RawSftpSession, SftpSession};
+use russh_sftp::protocol::{FileAttributes, OpenFlags};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use uuid::Uuid;
+```
+
+## 验收
+
+- SFTP 面板可以上传本地文件夹。
+- SFTP 面板可以下载远程文件夹。
+- SFTP 面板可以递归删除远程文件夹。
+- 单文件上传仍然走 pipelined upload。
+- 文件传输进度事件仍然发出。
+
+---
+
+# step-007：回归上游安全文件名和远程打开/编辑的文件名保护
+
+## 类型
+
+上游功能回归。
+
+## 目标
+
+避免远程服务端返回恶意文件名时，本地下载或临时编辑路径出现路径穿越、Windows 保留名或 shell 特殊字符问题。
+
+## 修改文件
+
+- `src/sftp.rs`
+
+## 代码来源
+
+参考：
+
+- `meatshell_main/src/sftp.rs` 的 `sanitize_filename()`
+- `meatshell_main/src/sftp.rs` 中单文件下载和 `OpenTemp` 分支
+
+## 执行
+
+在所有远程文件名落地到本地路径的地方，使用：
+
+```rust
+let filename = sanitize_filename(&base_name(&remote));
+```
+
+重点检查：
+
+- `SftpCommand::Download`
+- `SftpCommand::OpenTemp { remote, edit }`
+- 递归下载 `download_dir()` 中每个目录和文件名
+
+不要把远程完整路径直接拼到本地路径。
+
+## 验收
+
+- 远程文件名为 `../../evil.txt` 时，不会写出目标目录。
+- 远程文件名为 `CON.txt`、`NUL`、`COM1` 时，Windows 下不会命中设备名。
+- 远程文件名带 `&`、`$`、`'` 等字符时，本地文件名被安全替换。
+
+---
+
+# step-008：回归上游终端粘贴换行修复和 Alt 裸键修复
+
+## 类型
+
+上游 bug 修复回归。
+
+## 目标
+
+迁移 main 中终端输入修复：
+
+- 粘贴多行命令时统一换行为 CR；
+- 单独按 Alt 不应发送 ESC，不应清空当前命令；
+- 保留真实 Alt+字母作为 Meta 输入。
+
+## 修改文件
+
+- `src/app/terminal_input.rs`
+
+## 代码来源
+
+参考：
+
+- `meatshell_main/src/app.rs` 的 `normalize_pasted_newlines()`
+- `meatshell_main/src/app.rs` 的 `key_to_pty_bytes()` 相关 Alt guard
+
+## 执行
+
+### 1. 增加换行归一化函数
+
+```rust
+/// Normalise pasted text's line endings to a single CR (0x0d).
+fn normalize_pasted_newlines(text: &str) -> String {
+    text.replace("\r\n", "\r").replace('\n', "\r")
+}
+```
+
+### 2. 修改 paste 逻辑
+
+在 `window.on_paste_from_clipboard` 中，当前代码大致是：
+
+```rust
+clipboard_payload(&text, TerminalEngine::bracketed_paste(buf))
+```
+
+改为先归一化：
+
+```rust
+let text = normalize_pasted_newlines(&text);
+clipboard_payload(&text, TerminalEngine::bracketed_paste(buf))
+```
+
+### 3. 修复 Alt 裸键
+
+在 `key_to_pty_bytes` 中，`key.is_empty()` 之后增加对常见裸修饰键的忽略：
+
+```rust
+// Ignore bare modifier keys. Slint may send Alt alone as U+0012 with alt=true;
+// it must not be treated as Meta+Ctrl-R or ESC-prefixed input.
+if matches!(key, "\u{0010}" | "\u{0011}" | "\u{0012}" | "\u{0013}" | "\u{0014}") {
+    return vec![];
+}
+```
+
+### 4. 修复 dev 当前重复的 `if alt && !ctrl`
+
+dev 当前 `src/app/terminal_input.rs` 中存在重复的：
+
+```rust
+if alt && !ctrl {
+if alt && !ctrl {
+```
+
+改为单个分支：
+
+```rust
+if alt && !ctrl {
+    let mut bytes = vec![0x1b];
+    bytes.extend_from_slice(key.as_bytes());
+    return bytes;
+}
+```
+
+### 5. 增加测试
+
+在已有 `#[cfg(test)]` 中增加：
+
+```rust
+#[test]
+fn paste_normalizes_newlines_to_cr() {
+    assert_eq!(normalize_pasted_newlines("a\nb\nc"), "a\rb\rc");
+    assert_eq!(normalize_pasted_newlines("a\r\nb"), "a\rb");
+    assert_eq!(normalize_pasted_newlines("echo hi"), "echo hi");
+}
+
+#[test]
+fn bare_alt_sends_nothing() {
+    assert!(key_to_pty_bytes("\u{0012}", false, true, false).is_empty());
+}
+```
+
+## 验收
+
+- 粘贴反斜杠续行命令不会被错误拆开。
+- 单按 Alt 不会清空命令行。
+- Alt+a 仍然发送 ESC + `a`。
+
+---
+
+# step-009：回归上游远程资源监控安全修复
+
+## 类型
+
+上游 bug 修复回归。
+
+## 目标
+
+迁移 main 中远程资源监控加固：
+
+- 固定 PATH；
+- 限制 monitor buffer；
+- 限制网卡/磁盘条目数量；
+- 使用 saturating arithmetic；
+- 避免恶意服务端输出导致内存增长或 debug panic。
+
+## 修改文件
+
+- `src/ssh.rs`
+- `src/app/sidebar.rs`
+- `src/app/types.rs`
+
+## 代码来源
+
+参考：
+
+- `meatshell_main/src/ssh.rs`
+
+## 执行
+
+### 1. 替换监控命令
+
+使用 main 的固定 PATH 版本：
+
+```rust
+const MON_CMD: &[u8] = b"PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; while :; do awk '/^cpu /{print}' /proc/stat; awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree):/{print}' /proc/meminfo; cat /proc/net/dev; echo __DF__; df -kP 2>/dev/null; echo __MSTICK__; sleep 2; done\n";
+```
+
+### 2. 限制 monitor buffer
+
+在处理 `mon_buf` 的位置加入：
+
+```rust
+const MON_BUF_CAP: usize = 1 << 20;
+if mon_buf.len() > MON_BUF_CAP {
+    mon_buf.clear();
+}
+```
+
+### 3. 限制条目数量
+
+在 `parse_monitor_block` 中加入：
+
+```rust
+const MAX_MON_ENTRIES: usize = 64;
+```
+
+解析磁盘和网卡时都要检查长度上限。
+
+### 4. 使用饱和计算
+
+CPU total、idle、内存差值、KiB 转 bytes 均使用 main 的方式：
+
+```rust
+cpu_total = nums.iter().copied().fold(0u64, u64::saturating_add);
+cpu_idle = nums[3].saturating_add(nums.get(4).copied().unwrap_or(0));
+
+mem_used_kib: mem_total.saturating_sub(mem_avail),
+swap_used_kib: swap_total.saturating_sub(swap_free),
+
+Some((mount, avail_kb.saturating_mul(1024), total_kb.saturating_mul(1024)))
+```
+
+## 验收
+
+- 远程资源监控仍正常显示 CPU、内存、swap、网卡、磁盘。
+- 异常输出不会导致 UI 卡死或内存无限增长。
+- 测试中构造超大数字不会 panic。
+
+---
+
+# step-010：回归上游 shell integration 隐藏注入命令修复
+
+## 类型
+
+上游 bug 修复回归。
+
+## 目标
+
+上游通过注入 `PROMPT_COMMAND` 获取远程 CWD，但注入命令不应显示到终端，也不应污染 shell history。
+
+## 修改文件
+
+- `src/ssh.rs`
+
+## 代码来源
+
+参考：
+
+- `meatshell_main/src/ssh.rs` 中 `PROMPT_SETUP`、`ECHO_NEEDLE`、`suppress_echo` 逻辑
+
+## 执行
+
+迁移以下核心逻辑：
+
+```rust
+let mut prompt_injected = false;
+let mut suppress_echo = false;
+
+const PROMPT_SETUP: &[u8] = b" export PROMPT_COMMAND='printf \"\\033]7;file://${HOSTNAME}${PWD}\\007\"' && eval \"$PROMPT_COMMAND\"\r";
+
+const ECHO_NEEDLE: &str = "export PROMPT_COMMAND='printf \"\\033]7;file://${HOSTNAME}${PWD}\\007\"' && eval \"$PROMPT_COMMAND\"";
+```
+
+在收到第一段真实 shell 输出后注入：
+
+```rust
+if !prompt_injected && !text.trim().is_empty() {
+    prompt_injected = true;
+    suppress_echo = true;
+    let _ = channel.data(PROMPT_SETUP).await;
+}
+
+if suppress_echo {
+    text = text.replace(ECHO_NEEDLE, "");
+}
+
+if let Some(cwd) = extract_osc7_path(&text) {
+    suppress_echo = false;
+    let _ = events.send(SessionEvent::CwdChanged(cwd));
+}
+```
+
+## 验收
+
+- 连接 SSH 后不会看到 `export PROMPT_COMMAND=...` 命令闪现。
+- SFTP 面板仍可跟随远程 cwd。
+- 该命令不应出现在 shell history 中。
+
+---
+
+# step-011：回归上游连接配置导入/导出和会话分组基础能力
+
+## 类型
+
+上游功能回归。
+
+## 目标
+
+迁移 main 中较成熟的连接配置管理增强。这个 step 可以在主题和 SFTP 回归后执行。
+
+## 修改文件
+
+- `src/config.rs`
+- `src/app/sessions.rs`
+- `ui/welcome.slint`
+- `ui/session_dialog.slint`
+- `ui/app.slint`
+
+## 代码来源
+
+参考：
+
+- `meatshell_main/src/config.rs`
+- `meatshell_main/src/app.rs` 中 `sync_sessions_to_model`、导入导出、move group、toggle group 逻辑
+- `meatshell_main/ui/welcome.slint`
+- `meatshell_main/ui/session_dialog.slint`
+
+## 执行
+
+### 1. 会话分组
+
+给 Slint `SessionInfo` 增加字段：
+
+```slint
+group: string,
+group-header: string,
+collapsed: bool,
+```
+
+给 `SessionDraft` 增加：
+
+```slint
+group: string,
+```
+
+Rust 中同步修改对应结构体映射。
+
+### 2. 迁移分组排序逻辑
+
+把 main `sync_sessions_to_model` 中按 group 排序的逻辑迁移到 dev 的：
+
+- `src/app/sessions.rs::sync_sessions_to_model`
+
+核心行为：
+
+- 空 group 显示为 `default`；
+- 按 group 排序；
+- 每组第一行写入 `group_header`；
+- 折叠状态由 UI 控制。
+
+### 3. 迁移 move-session / toggle-group 回调
+
+dev `ui/app.slint` 增加：
+
+```slint
+callback move-session(string /* session-id */, string /* group */);
+callback toggle-group(string /* group */);
+```
+
+Rust 中在 `src/app/sessions.rs` 接线。
+
+### 4. 迁移导入/导出
+
+从 main `src/config.rs` 迁移：
+
+```rust
+pub fn export_to(&self, path: &Path) -> Result<usize> { ... }
+pub fn import_from(&mut self, path: &Path) -> Result<(usize, usize)> { ... }
+```
+
+从 main `src/app.rs` 把 `on_export_sessions`、`on_import_sessions` 的逻辑迁移到 dev `src/app/sessions.rs`。
+
+## 验收
+
+- 新建会话可以设置 group。
+- 欢迎页按 group 展示。
+- group 可折叠。
+- 导出连接配置为 JSON。
+- 导入 JSON 时跳过重复项。
+- 旧会话没有 group 时进入 `default`。
+
+---
+
+# step-012：修复 debug 启动 ICU4X ja 分词模型重复报错
+
+## 类型
+
+dev bug 修复。
+
+## 目标
+
+解决 debug 启动时控制台反复输出：
+
+```text
+ICU4X data error: No segmentation model for language: ja
+```
+
+## 修改文件
+
+- `src/i18n.rs`
+- `src/app/mod.rs`
+
+## 执行
+
+### 1. 在 i18n 中增加语言白名单归一化
+
+```rust
+pub fn normalize_language(code: &str) -> &'static str {
+    let lower = code.to_ascii_lowercase();
+    if lower.starts_with("en") {
+        "en"
+    } else if lower.starts_with("zh") {
+        "zh"
+    } else {
+        "zh"
+    }
+}
+```
+
+### 2. 修改 `set_language`
+
+```rust
+pub fn set_language(code: &str) {
+    let code = normalize_language(code);
+    let en = code == "en";
+    LANG.store(if en { EN } else { ZH }, Ordering::Relaxed);
+    apply_to_slint();
+}
+```
+
+### 3. `ConfigStore::language()` 返回值也要避免 ja
+
+如果配置中存在 `ja` 或系统传入 `ja`，保存时统一变为 `zh` 或 `en`。
+
+### 4. 初始化顺序
+
+在 `src/app/mod.rs` 中，语言设置仍在 `AppWindow::new()` 后执行，但传入必须是 `normalize_language(...)` 后的值。
+
+## 验收
+
+- debug 启动时不再重复输出 ICU4X ja segmentation model 错误。
+- 中文/英文切换仍正常。
+- 配置中写入 `ja` 后，下次启动也会 fallback 到 `zh`。
+
+---
+
+# step-013：修复主界面菜单栏位置，菜单栏在标签页上方
+
+## 类型
+
+dev bug 修复。
+
+## 目标
+
+当前 dev 中 `TopActionBar` 在 `TabBar` 下方，应改为菜单栏在上、标签页在下。
+
+## 修改文件
+
+- `ui/app.slint`
+
+## 执行
+
+当前 dev 右侧主区域顺序大致是：
+
+```slint
+TabBar { ... }
+TopActionBar { ... }
+Rectangle { /* content */ }
+```
+
+改为：
+
+```slint
+TopActionBar {
+    sidebar-visible: root.sidebar-visible;
+    bottom-panel-visible: root.bottom-panel-visible;
+    toggle-sidebar => { root.toggle-sidebar(); }
+    toggle-bottom-panel => { root.toggle-bottom-panel(); }
+    disconnect-active-tab => { root.disconnect-active-tab(); }
+    reconnect-active-tab => { root.reconnect-active-tab(); }
+    open-transfer-window => { root.open-transfer-window(); }
+}
+
+TabBar {
+    tabs: root.tabs;
+    active-id: root.active-tab-id;
+    tab-selected(id) => {
+        root.active-tab-id = id;
+        root.tab-selected(id);
+    }
+    tab-closed(id) => { root.tab-closed(id); }
+    new-tab() => { root.new-tab-clicked(); }
+}
+
+Rectangle {
+    vertical-stretch: 1;
+    background: Theme.bg-root;
+    // content
+}
+```
+
+## 验收
+
+- 主菜单栏显示在最上方。
+- 标签页在菜单栏下方。
+- 标签切换、新建、关闭仍正常。
+
+---
+
+# step-014：修复标签页/菜单按钮 tooltip 被遮挡
+
+## 类型
+
+dev bug 修复。
+
+## 目标
+
+当前 `top_action_bar.slint` 中 tooltip 是按钮子元素，容易被父容器裁剪或被终端区域遮挡。改为根窗口级 tooltip。
+
+## 修改文件
+
+- `ui/app.slint`
+- `ui/top_action_bar.slint`
+- `ui/tabs.slint`
+
+## 执行
+
+### 1. 在 `AppWindow` 根组件增加 tooltip 状态
+
+```slint
+in-out property <string> global-tooltip-text: "";
+in-out property <length> global-tooltip-x: 0px;
+in-out property <length> global-tooltip-y: 0px;
+```
+
+### 2. 在根组件末尾增加统一 tooltip 浮层
+
+放在所有 popup/dialog 后面，保证 z-order 最高：
+
+```slint
+if root.global-tooltip-text != "" : Rectangle {
+    x: root.global-tooltip-x;
+    y: root.global-tooltip-y;
+    width: tip.preferred-width + 14px;
+    height: 24px;
+    border-radius: Theme.radius-sm;
+    background: Theme.bg-elevated;
+    border-width: 1px;
+    border-color: Theme.border-subtle;
+    drop-shadow-blur: 8px;
+    drop-shadow-color: #00000040;
+
+    tip := Text {
+        x: 7px;
+        text: root.global-tooltip-text;
+        color: Theme.text-primary;
+        font-size: Theme.fs-xs;
+        vertical-alignment: center;
+    }
+}
+```
+
+### 3. 修改按钮组件
+
+`top_action_bar.slint` 中删除按钮内部的 `if touch.has-hover : Rectangle { ... }` tooltip。
+
+增加回调：
+
+```slint
+callback tooltip-show(string, length, length);
+callback tooltip-hide();
+```
+
+在 hover 变化时通知根组件。若 Slint 当前写法不好处理 hover changed，可以先使用按钮 `TouchArea` 的 `entered/exited` 或可用事件；如果没有对应事件，则简化为取消 tooltip，避免遮挡问题。
+
+### 4. `AppWindow` 接线
+
+`TopActionBar` 中：
+
+```slint
+tooltip-show(text, x, y) => {
+    root.global-tooltip-text = text;
+    root.global-tooltip-x = x;
+    root.global-tooltip-y = y;
+}
+tooltip-hide => {
+    root.global-tooltip-text = "";
+}
+```
+
+## 验收
+
+- tooltip 不再被标签栏、菜单栏、终端区域遮挡。
+- tooltip 不影响按钮点击。
+- 若实现成本过高，允许先禁用 tooltip，不允许继续显示被遮挡的 tooltip。
+
+---
+
+# step-015：增加统一 active session guard，禁止新标签页执行会话操作
+
+## 类型
+
+dev bug 修复。
+
+## 目标
+
+欢迎页/新标签页没有连接会话时，文件、隧道、断开、重连等操作都应统一提示“请先连接一个会话”，不得误执行。
+
+## 修改文件
+
+- `src/app/tabs.rs`
+- `src/app/transfer.rs`
+- `src/app/tunnels.rs`
+- `src/app/sftp_panel.rs`
+- `src/app/models.rs` 或新增 helper 模块
+
+## 执行
+
+### 1. 增加 helper
+
+建议在 `src/app/tabs.rs` 或新建 `src/app/guards.rs`：
+
+```rust
+pub(super) fn active_session_or_hint(
+    win: &super::AppWindow,
+    connections: &super::types::ConnectionStore,
+) -> Option<(String, crate::config::Session)> {
+    let active = win.get_active_tab_id().to_string();
+    if active == "welcome" {
+        win.set_ssh_import_hint(crate::i18n::t(
+            "请先连接一个会话",
+            "Connect a session first",
+        ).into());
+        return None;
+    }
+    let session = connections.lock().unwrap().session(&active);
+    if session.is_none() {
+        super::models::set_terminal_row(win, &active, |row| {
+            row.status = crate::i18n::t(
+                "请先连接一个会话",
+                "Connect a session first",
+            ).into();
+        });
+        return None;
+    }
+    session.map(|s| (active, s))
+}
+```
+
+### 2. 在以下入口使用 guard
+
+- `open_transfer_window`
+- `tunnel_add_rule`
+- `tunnel_update_rule`
+- `tunnel_toggle_rule`
+- `tunnel_delete_rule`
+- `disconnect_active_tab`
+- `reconnect_active_tab`
+- SFTP 上传/下载/删除/查看/编辑
+
+### 3. 统一提示文案
+
+中文：
+
+```text
+请先连接一个会话
+```
+
+英文：
+
+```text
+Connect a session first
+```
+
+## 验收
+
+- 欢迎页点击“新建文件传输窗口”只提示，不打开窗口。
+- 欢迎页点击隧道相关按钮只提示，不创建规则。
+- 欢迎页点击断开/重连不报错。
+- 已连接会话中原功能正常。
+
+---
+
+# step-016：修复 Alacritty 模式普通页面鼠标滚动不生效
+
+## 类型
+
+dev bug 修复。
+
+## 目标
+
+Alacritty 模式下：
+
+- 普通 shell 页面滚轮滚动本地 scrollback；
+- htop/vim/less 等启用 mouse reporting 或 alt screen 时，滚轮仍发送给远程应用；
+- legacy 模式不受影响。
+
+## 修改文件
+
+- `src/app/terminal_input.rs`
+- `src/app/terminal_render.rs`
+- `src/terminal/alacritty.rs`
+- `src/terminal/legacy.rs`
+
+## 执行
+
+### 1. 给 Alacritty engine 增加 scrollback offset
+
+在 `src/terminal/alacritty.rs` 的状态结构中增加：
+
+```rust
+pub view_offset: usize,
+```
+
+如果已有类似字段，复用已有字段。
+
+### 2. 增加滚动方法
+
+```rust
+pub fn scroll_lines(&mut self, delta: i32) {
+    let max_off = self.scrollback_len();
+    let cur = self.view_offset as i64;
+    self.view_offset = (cur + delta as i64).clamp(0, max_off as i64) as usize;
+}
+```
+
+`scrollback_len()` 根据 alacritty_terminal 当前可回看行数实现。
+
+### 3. 修改 `on_terminal_scroll`
+
+当前 dev 只改 legacy 的 `buf.view_offset`。需要判断当前 engine：
+
+```rust
+if let Some(alacritty) = buf.alacritty.as_mut() {
+    if !buf.is_alt_screen() && !buf.mouse_reporting() {
+        alacritty.scroll_lines(delta);
+    } else {
+        // 保持已有 mouse wheel → remote app 逻辑
+    }
+} else {
+    // legacy 原逻辑
+    let max_off = buf.history.len() as i64;
+    let cur = buf.view_offset as i64;
+    buf.view_offset = (cur + delta as i64).clamp(0, max_off) as usize;
+}
+```
+
+具体方法名按 dev 当前 `LegacyTerminalEngine` / `Alacritty` 封装调整。
+
+### 4. 修改渲染
+
+`terminal_render.rs` 渲染 Alacritty 时必须使用 Alacritty 的 `view_offset` 取可见区域，而不是始终渲染底部。
+
+## 验收
+
+- Alacritty 模式普通 shell 输出可滚轮上翻/下翻。
+- htop 中滚轮仍由 htop 响应。
+- legacy 模式滚轮不回退。
+
+---
+
+# step-017：文件传输窗口改为单例窗口
+
+## 类型
+
+新增功能。
+
+## 目标
+
+点击“新建文件传输窗口”时，不再创建多个窗口；应用内最多只有一个文件传输窗口。
+
+## 修改文件
+
+- `src/app/types.rs`
+- `src/app/transfer.rs`
+- `ui/transfer_window.slint`
+
+## 执行
+
+### 1. 修改状态结构
+
+当前 dev：
+
+```rust
+pub(super) type TransferWindows = Rc<RefCell<Vec<TransferWindowState>>>;
+```
+
+改为单例：
+
+```rust
+#[allow(dead_code)]
+pub(super) struct TransferWindowState {
+    pub(super) window: super::TransferWindow,
+    // 后续 step 会把 _sftp 改为多 tab map
+    pub(super) sftp: Rc<SftpHandle>,
+}
+
+pub(super) type TransferWindowStore = Rc<RefCell<Option<TransferWindowState>>>;
+```
+
+如暂时不想重命名太多，也可保留 `TransferWindows` 类型名，但内部改成 `Option`。
+
+### 2. 修改 `open_transfer_window`
+
+逻辑：
+
+```rust
+if let Some(existing) = transfer_windows.borrow().as_ref() {
+    existing.window.show()?;
+    existing.window.window().request_window_properties_update();
+    return Ok(());
+}
+```
+
+如果 Slint 没有 `request_window_properties_update`，只调用 `show()` 即可。
+
+### 3. 关闭窗口时隐藏，不销毁状态
+
+```rust
+window.window().on_close_requested(move || {
+    let _ = window.hide();
+    slint::CloseRequestResponse::HideWindow
+});
+```
+
+## 验收
+
+- 多次点击菜单按钮，窗口数量始终只有一个。
+- 关闭后再次打开仍是同一个窗口逻辑。
+- 当前单 tab 文件传输功能仍可用。
+
+---
+
+# step-018：文件传输窗口右侧远程区域支持多 tab
+
+## 类型
+
+新增功能。
+
+## 目标
+
+文件传输窗口类似 Xftp：左侧本地面板共享，右侧远程面板按 SSH 会话分 tab。
+
+## 修改文件
+
+- `src/app/types.rs`
+- `src/app/transfer.rs`
+- `ui/transfer_window.slint`
+- `ui/remote_file_panel.slint`
+
+## 执行
+
+### 1. 新增远程 tab 数据结构
+
+Rust：
+
+```rust
+pub(super) struct TransferRemoteTab {
     pub id: String,
-    pub session_id: String,
-    pub name: String,
-    pub enabled: bool,
-    pub local_host: String,
-    pub local_port: u16,
-    pub remote_host: String,
-    pub remote_port: u16,
+    pub title: String,
+    pub session: crate::config::Session,
+    pub sftp: Rc<crate::sftp::SftpHandle>,
+    pub remote_path: String,
+    pub connected: bool,
 }
 ```
 
-不要一开始就抽象 `TunnelKind`，除非实现时确实需要。第一版只有 Local Forward。
+Slint：
 
-### 任务 8A.2：定义 TunnelStatus / TunnelHandle
-
-建议状态：
-
-```rust
-pub enum TunnelStatus {
-    Stopped,
-    Starting,
-    Running,
-    Reconnecting,
-    Failed(String),
+```slint
+export struct TransferRemoteTabInfo {
+    id: string,
+    title: string,
+    connected: bool,
 }
 ```
 
-要求每条隧道都有明确 stop/cancel 入口。
+### 2. 文件传输窗口增加远程 tab model
 
-### 任务 8A.3：实现 Local Forward Core
+`ui/transfer_window.slint` 增加：
 
-行为：
-
-```text
-监听 local_host:local_port
-收到本地 TCP 连接
-通过 SSH 打开 direct-tcpip 到 remote_host:remote_port
-双向转发数据
+```slint
+in property <[TransferRemoteTabInfo]> remote-tabs;
+in-out property <string> active-remote-tab-id;
+callback remote-tab-selected(string);
+callback remote-tab-closed(string);
+callback remote-tab-reconnect(string);
 ```
 
-第一版可以每条规则独立 SSH 连接，但必须包含：
+### 3. 点击打开文件传输窗口时
 
-- keepalive
-- 自动重连
-- backoff
-- 状态显示
-- stop/cancel handle
-- 端口占用错误提示
+- 如果窗口不存在：创建窗口。
+- 如果当前会话没有 remote tab：创建一个 tab。
+- 如果已有：激活已有 tab。
+- 不重复创建同一 session tab。
 
-## 阶段 8B：TunnelPanel + 持久化 + 自动启动
+### 4. 远程文件列表按 active tab 显示
 
-### 任务 8B.1：规则持久化
+当前 `TransferWindow` 只有一份 `remote_path` 和 `remote_entries`。本 step 可以先让 UI 仍用这一份显示模型，但切换 tab 时由 Rust 刷新为该 tab 的状态。
 
-规则保存到单独配置文件，例如：
+## 验收
 
-```text
-tunnels.json
-```
-
-不要第一版就把规则塞进原有 Session 结构，避免牵连会话编辑 UI。
-
-### 任务 8B.2：UI 管理规则
-
-`TunnelPanel` 支持：
-
-- 显示规则列表。
-- 显示状态：Stopped / Starting / Running / Reconnecting / Failed。
-- 新增规则。
-- 启用/禁用规则。
-- 删除规则。
-
-### 任务 8B.3：session 关联和自动启动
-
-行为：
-
-- session 连接后，自动启动当前 session 下 enabled 的 Local Forward 规则。
-- session 断开后，对应规则停止或进入断开状态。
-- 隧道规则失败不影响主终端。
-
-## 验收标准
-
-- 能新增 Local Forward 规则。
-- 能保存和读取规则。
-- session 连接后 enabled 规则自动启动。
-- session 断开后对应规则停止或进入断开状态。
-- 本地端口访问能转发到远程地址。
-- 本地端口被占用时能显示明确错误。
-- 隧道断线后能自动重连或显示失败状态。
-- 停止/删除规则后后台任务确实退出，本地端口释放。
-- `cargo fmt`、`cargo check` 通过。
-- `docs/code-map.md` 已更新。
-
-## Codex 提示词建议
-
-```text
-请执行阶段 8：隧道规则与本地端口转发第一版。
-要求：
-1. 先阅读 docs/code-map.md。
-2. 只实现 Local Forward。
-3. 新增 TunnelRule、TunnelStatus、TunnelHandle 和 tunnel.rs。
-4. 先完成 Tunnel Core，再扩展 TunnelPanel。
-5. 规则保存到独立 tunnels.json，不改原有 Session 结构。
-6. 支持新增、启用、禁用、删除规则。
-7. 支持 keepalive、自动重连、backoff、状态显示、stop/cancel handle。
-8. 停止或删除规则后必须释放本地端口。
-9. 隧道失败不能影响主终端连接。
-10. 不做 Remote Forward 和 Dynamic SOCKS。
-11. 更新 docs/code-map.md。
-12. 运行 cargo fmt 和 cargo check。
-```
+- 同一个会话重复打开文件传输窗口，只激活已有 remote tab。
+- 不同会话打开文件传输窗口，在右侧新增不同 tab。
+- 切换 tab 后远程路径和文件列表对应正确。
 
 ---
 
-# 阶段 9：配置、错误提示、文档与体验收尾
+# step-019：文件传输窗口 tab 双击重新连接
+
+## 类型
+
+新增功能。
 
 ## 目标
 
-在主要能力完成后，做一次克制的收尾整理，重点解决配置、状态恢复、用户体验和文档一致性。
+文件传输窗口的远程 tab 标签双击后，用该 tab 保存的 session config 重新建立 SFTP 连接。
 
-## 不做什么
+## 修改文件
 
-本阶段不做大功能。尤其不做：
+- `ui/transfer_window.slint`
+- `src/app/transfer.rs`
 
-- 不新增新的传输协议。
-- 不新增插件系统。
-- 不重写主题系统。
-- 不重构全部 UI。
-- 不新增复杂配置迁移框架。
+## 执行
 
-## 具体任务
+### 1. Slint tab 增加双击回调
 
-### 任务 9.1：配置文件整理
+如果 Slint `TouchArea` 支持 click count，使用双击；否则临时采用右键菜单或小按钮作为 fallback。
 
-检查以下配置是否稳定：
+期望回调：
 
-- session 配置
-- `tunnels.json`
-- 文件传输窗口默认本地路径
-- 终端引擎模式配置
-- 底部面板默认显示状态
-
-原则：
-
-- 能不迁移旧配置就不迁移。
-- 必须迁移时，写清兼容逻辑。
-- 不引入复杂版本迁移框架，除非已有配置已经明显不兼容。
-
-### 任务 9.2：连接状态统一显示
-
-统一主窗口、tab、文件传输窗口、隧道面板中的状态：
-
-```text
-Connecting
-Connected
-Disconnected
-Reconnecting
-Failed
+```slint
+callback remote-tab-reconnect(string);
 ```
 
-不要每个面板各自发明一套状态文案。
+### 2. Rust 处理重连
 
-### 任务 9.3：基础错误提示优化
-
-重点优化：
-
-- SSH 连接失败。
-- SFTP 连接失败。
-- 文件上传/下载失败。
-- 隧道端口被占用。
-- 隧道认证失败。
-- alacritty 引擎初始化失败。
-
-错误提示要具体，但不做复杂错误码系统。
-
-### 任务 9.4：文档更新
-
-更新：
-
-```text
-docs/code-map.md
-README.md 或 docs/usage.md
+```rust
+fn reconnect_transfer_tab(tab_id: &str) {
+    // 1. 找到 tab 保存的 Session
+    // 2. 关闭旧 sftp handle
+    // 3. spawn_sftp(runtime.handle(), session.clone(), tx)
+    // 4. 设置状态为 connecting
+    // 5. 成功后 list_dir(tab.remote_path)
+}
 ```
 
-写清：
+## 验收
 
-- 顶部工具栏功能。
-- 文件传输窗口使用方式。
-- 隧道规则使用方式。
-- 终端引擎模式说明。
-- Legacy / Alacritty Experimental 的切换方式。
-
-## 验收标准
-
-- 配置重启后能恢复。
-- 常见错误有明确提示。
-- 文档与实际功能一致。
-- `cargo fmt`、`cargo check`、`cargo test` 通过。
-
-## Codex 提示词建议
-
-```text
-请执行阶段 9：配置、错误提示、文档与体验收尾。
-要求：
-1. 先阅读 docs/code-map.md。
-2. 不新增大功能。
-3. 统一连接状态文案。
-4. 检查配置持久化和重启恢复。
-5. 优化常见错误提示。
-6. 更新 docs/code-map.md 和使用文档。
-7. 运行 cargo fmt、cargo check、cargo test。
-```
+- 双击远程 tab 能重新连接。
+- 失败只影响当前 tab。
+- 成功后刷新当前远程路径。
+- 不要求用户重新输入密码。
 
 ---
 
-# 推荐执行顺序
+# step-020：文件传输窗口底部增加传输记录窗格
 
-建议严格按以下顺序执行：
+## 类型
 
-```text
-阶段 0：同步独立维护规则
-阶段 1：基线整理与最小 App 分层
-阶段 2：顶部工具栏与底部面板骨架
-阶段 3：连接生命周期统一入口
-阶段 4：终端类型与 Legacy 引擎边界
-阶段 5：alacritty_terminal 实验引擎
-阶段 6：终端鼠标与 TUI 交互增强
-阶段 7：独立文件传输窗口第一版
-阶段 8：隧道规则与本地端口转发第一版
-阶段 9：配置、错误提示、文档与体验收尾
+新增功能。
+
+## 目标
+
+文件传输窗口底部显示当前传输任务和历史记录，并复用现有 `root.transfers` 数据，不新建第二套传输任务系统。
+
+## 修改文件
+
+- `ui/transfer_window.slint`
+- `src/app/transfer.rs`
+- `src/app/events.rs`
+
+## 执行
+
+### 1. 复用现有 transfer model
+
+`TransferWindow` 增加属性：
+
+```slint
+in property <[TransferInfo]> transfers;
+callback clear-transfers();
 ```
 
-其中阶段 3 和阶段 4 都是基础重构阶段，但它们的目的不同：
+如果 `TransferInfo` 只在 `app.slint` 定义，需要移到可 import 的公共 ui 文件，或在 `transfer_window.slint` 重复定义同名结构并由 Rust 映射。
 
-- 阶段 3 是为了连接、断开、重连、状态统一。
-- 阶段 4 是为了终端核心替换。
+### 2. 布局
 
-不建议把这两个阶段合并，否则改动面会过大。
+文件传输窗口主区域：
+
+```text
+上方：本地面板 + 远程面板
+下方：传输记录窗格
+```
+
+传输记录先显示：
+
+- 方向图标；
+- 名称；
+- 状态/进度；
+- 进度条。
+
+### 3. Rust 同步
+
+每次主窗口 transfer model 更新时，也同步到已打开的 transfer window。
+
+## 验收
+
+- 文件传输窗口底部可以看到上传/下载记录。
+- 与主窗口下载管理 popup 使用同一份数据。
+- 清空记录时两个地方同时清空。
 
 ---
 
-# 每个阶段的提交建议
+# step-021：文件传输窗口增加本地/远程右键菜单
 
-每个阶段建议至少一个独立分支：
+## 类型
 
-```text
-phase-0-independent-maintenance
-phase-1-app-state
-phase-2-toolbar-bottom-panel
-phase-3-connection-manager
-phase-4-terminal-engine-boundary
-phase-5-alacritty-engine
-phase-6-terminal-mouse-tui
-phase-7-transfer-window
-phase-8-tunnel-local-forward
-phase-9-polish-config-docs
+新增功能。
+
+## 目标
+
+文件传输窗口中，本地和远程文件列表都支持右键菜单：
+
+- 传输；
+- 打开；
+- 用记事本编辑；
+- 重命名。
+
+## 修改文件
+
+- `ui/local_file_panel.slint`
+- `ui/remote_file_panel.slint`
+- `ui/transfer_window.slint`
+- `src/app/transfer.rs`
+- `src/file_transfer.rs`
+- `src/sftp.rs`
+
+## 执行
+
+### 1. Slint 增加右键回调
+
+本地面板：
+
+```slint
+callback local-transfer(string /* full_path */);
+callback local-open(string /* full_path */);
+callback local-edit(string /* full_path */);
+callback local-rename(string /* full_path */, string /* new_name */);
 ```
 
-每个阶段提交信息建议：
+远程面板：
 
-```text
-phase N: 简短说明
+```slint
+callback remote-transfer(string /* full_path */);
+callback remote-open(string /* full_path */);
+callback remote-edit(string /* full_path */);
+callback remote-rename(string /* full_path */, string /* new_name */);
 ```
 
-例如：
+### 2. 本地行为
 
-```text
-phase 2: add top action bar and bottom panel tabs
+- 传输：上传到 active remote tab 的当前目录；
+- 打开：使用系统默认打开；
+- 用记事本编辑：Windows 优先 `notepad.exe`，其他系统用默认编辑器或 xdg-open；
+- 重命名：`std::fs::rename`。
+
+### 3. 远程行为
+
+- 传输：下载到当前本地目录；
+- 打开：复用 `SftpCommand::OpenTemp { edit: false }`；
+- 用记事本编辑：复用 `SftpCommand::OpenTemp { edit: true }`；
+- 重命名：新增 SFTP rename 命令。
+
+### 4. 新增 SFTP rename 命令
+
+`SftpCommand` 增加：
+
+```rust
+Rename { old_path: String, new_path: String },
 ```
+
+worker 中处理：
+
+```rust
+SftpCommand::Rename { old_path, new_path } => {
+    match sftp.rename(&old_path, &new_path).await {
+        Ok(_) => {
+            let parent = parent_dir(&new_path);
+            if let Ok(entries) = list_dir_impl(&sftp, &parent).await {
+                let _ = events.send(SessionEvent::SftpEntries { path: parent, entries });
+            }
+        }
+        Err(e) => {
+            let _ = events.send(SessionEvent::SftpStatus(format!(
+                "{}: {e}", t("重命名失败", "Rename failed")
+            )));
+        }
+    }
+}
+```
+
+## 验收
+
+- 本地文件右键上传可用。
+- 远程文件右键下载可用。
+- 远程文件打开/编辑复用现有临时下载逻辑。
+- 重命名成功后列表刷新。
 
 ---
 
-# 风险控制
+# step-022：文件传输窗口支持文件夹传输
 
-## 高风险阶段
+## 类型
 
-高风险阶段包括：
+新增功能。
 
-- 阶段 5：接入 `alacritty_terminal`
-- 阶段 6：终端鼠标/TUI 交互
-- 阶段 8：隧道 Local Forward
+## 目标
 
-这些阶段建议单独开发、单独测试，不要和 UI 样式调整混在一起。
+文件传输窗口复用 step-006 的 SFTP 递归能力，实现：
 
-## 回退策略
+- 本地文件夹上传；
+- 远程文件夹下载；
+- 远程文件夹删除，如果菜单后续添加删除，也应递归删除。
 
-必须保留以下回退能力：
+## 修改文件
 
-- 终端引擎可回退 Legacy。
-- 文件传输窗口关闭不影响主窗口。
-- 隧道规则失败不影响终端连接。
-- 工具栏新增按钮失败不影响原有 tab 操作。
+- `src/app/transfer.rs`
+- `ui/local_file_panel.slint`
+- `ui/remote_file_panel.slint`
 
-## 后台任务安全
+## 执行
 
-涉及 SSH、SFTP、文件传输、隧道、重连循环时，必须满足：
+本 step 不再新增递归函数，只调用现有：
 
-- 每个后台任务都有明确 stop/cancel 入口。
-- UI 状态不能显示“已停止”，但后台任务仍在运行。
-- 自动重连必须有 backoff。
-- session/window/rule 删除后，相关后台任务必须退出。
-- 端口监听失败必须显示具体错误。
+```rust
+sftp.upload(local_path, remote_dir);
+sftp.download(remote_path, local_dir);
+```
+
+因为 step-006 已经让 `SftpCommand::Upload` / `Download` 自动判断文件夹。
+
+## 验收
+
+- 文件传输窗口中，本地文件夹右键“传输”可以递归上传。
+- 远程文件夹右键“传输”可以递归下载。
+- 传输记录显示文件夹内文件的进度。
+- 不存在 transfer window 单独实现的递归代码。
 
 ---
 
-# 最终目标状态
+# step-023：文件传输窗口显示更多文件信息
 
-完成所有阶段后，项目应具备以下结构特征：
+## 类型
 
-```text
-app.rs
-  仍是入口，但不再无限膨胀
+新增功能。
 
-app_state
-  保存少量全局 UI 状态
+## 目标
 
-connection
-  统一管理连接、断开、重连、状态
+文件传输窗口文件列表不只显示名称和大小，还显示：
 
-terminal_types / terminal_engine
-  支持 Legacy 和 Alacritty Experimental
+- 类型；
+- 修改时间；
+- 属性；
+- 所有者。
 
-file_transfer
-  支持独立窗口、本地/远程双栏、基础上传下载
+## 修改文件
 
-tunnel
-  支持 session 关联的 Local Forward 规则
+- `src/ssh.rs`
+- `src/file_transfer.rs`
+- `src/app/transfer.rs`
+- `ui/local_file_panel.slint`
+- `ui/remote_file_panel.slint`
+- `ui/sftp_panel.slint`
 
-ui
-  有顶部工具栏、底部 tab 面板、独立文件传输窗口
+## 执行
+
+### 1. 扩展数据结构
+
+`RemoteEntry` 增加：
+
+```rust
+pub file_type: String,
+pub permissions: String,
+pub owner: String,
 ```
 
-最终使用体验应达到：
+`LocalFileEntry` 增加：
 
-- 日常 SSH 连接和原项目一致或更稳定。
-- 顶部工具栏提供常用操作。
-- 底部面板支持文件和隧道切换。
-- 文件传输窗口具备基础 Xftp 使用体验。
-- 终端模拟能力明显强于原有实现。
-- TUI 应用和 PowerShell 兼容性明显提升。
-- 隧道 Local Forward 可用于常见开发场景。
+```rust
+pub file_type: String,
+pub permissions: String,
+pub owner: String,
+```
+
+Slint `SftpEntry` 增加：
+
+```slint
+type-name: string,
+permissions: string,
+owner: string,
+```
+
+### 2. 远程侧填充
+
+Linux 权限可以先从 `permissions` bits 转换：
+
+```rust
+fn format_unix_mode(mode: u32, is_dir: bool) -> String {
+    let mut s = String::new();
+    s.push(if is_dir { 'd' } else { '-' });
+    for shift in [6, 3, 0] {
+        let bits = (mode >> shift) & 0o7;
+        s.push(if bits & 0o4 != 0 { 'r' } else { '-' });
+        s.push(if bits & 0o2 != 0 { 'w' } else { '-' });
+        s.push(if bits & 0o1 != 0 { 'x' } else { '-' });
+    }
+    s
+}
+```
+
+owner 如果当前 SFTP metadata 只能拿 uid/gid，就先显示：
+
+```text
+uid:gid
+```
+
+### 3. 本地侧填充
+
+Windows 无法稳定获取所有者/权限时允许为空：
+
+```rust
+permissions: String::new(),
+owner: String::new(),
+```
+
+类型：
+
+- 文件夹：`Folder` / `文件夹`
+- 普通文件：按扩展名或 `File` / `文件`
+
+### 4. UI 列
+
+列顺序建议：
+
+```text
+名称 | 大小 | 类型 | 修改时间 | 属性 | 所有者
+```
+
+文件名列保留最大宽度和 elide，避免布局被挤爆。
+
+## 验收
+
+- 文件传输窗口显示新增列。
+- Linux 远程文件显示类似 `drwxr-xr-x` 权限。
+- 修改时间仍显示正常。
+- Windows 本地权限/所有者为空也不崩溃。
+
+---
+
+# step-024：隧道窗格改为右键菜单管理
+
+## 类型
+
+新增功能。
+
+## 目标
+
+隧道面板去掉 Add 按钮，改为右键菜单管理。菜单包含：
+
+- 添加；
+- 删除；
+- 编辑；
+- 挂起；
+- 继续。
+
+## 修改文件
+
+- `src/tunnel.rs`
+- `src/app/tunnels.rs`
+- `ui/tunnel_panel.slint`
+
+## 执行
+
+### 1. 删除 UI 上显式 Add 按钮
+
+`ui/tunnel_panel.slint` 中移除：
+
+```slint
+SmallButton {
+    text: @tr("Add");
+    primary: true;
+    clicked => { root.add-rule(); }
+}
+```
+
+### 2. 增加右键菜单状态
+
+```slint
+in-out property <string> selected-rule-id: "";
+in-out property <bool> menu-open: false;
+callback menu-add();
+callback menu-edit(string);
+callback menu-delete(string);
+callback menu-suspend(string);
+callback menu-resume(string);
+```
+
+### 3. 添加/编辑弹窗字段
+
+弹窗字段：
+
+- 类型/方向；
+- 源主机；
+- 侦听端口；
+- 目标主机；
+- 目标端口；
+- 确定；
+- 取消。
+
+如果当前后端只支持本地转发，类型先固定为 `local`，UI 文案显示“本地转发”。
+
+### 4. 数据结构预留方向字段
+
+`TunnelRule` 增加：
+
+```rust
+#[serde(default)]
+pub direction: TunnelDirection,
+```
+
+新增：
+
+```rust
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TunnelDirection {
+    Local,
+    Remote,
+    Dynamic,
+}
+
+impl Default for TunnelDirection {
+    fn default() -> Self {
+        TunnelDirection::Local
+    }
+}
+```
+
+本轮只实现 `Local` 的启动逻辑。
+
+### 5. 挂起/继续
+
+- 挂起：停止当前 tunnel handle，但不删除规则，状态改为 `Stopped`，`enabled` 可以保留 true 或新增 `suspended` 字段。
+- 继续：按原规则重新启动。
+
+建议增加字段：
+
+```rust
+#[serde(default)]
+pub suspended: bool,
+```
+
+挂起时：`suspended = true`。继续时：`suspended = false`。
+
+## 验收
+
+- 隧道面板没有 Add 按钮。
+- 右键空白区域可添加。
+- 右键已有规则可编辑/删除/挂起/继续。
+- 删除/编辑必须选中规则才可用。
+- 挂起只对运行中规则可用。
+- 继续只对挂起规则可用。
+- 无连接会话时提示“请先连接一个会话”。
+
+---
+
+# step-025：侧边栏新增会话程序监测表
+
+## 类型
+
+新增功能。
+
+## 目标
+
+在侧边栏“服务器资源”下方新增进程监测表，列为：
+
+```text
+内存 | CPU | 命令
+```
+
+支持点击“内存”或“CPU”表头按占用从大到小排序。
+
+## 修改文件
+
+- `src/ssh.rs`
+- `src/app/types.rs`
+- `src/app/sidebar.rs`
+- `ui/sidebar.slint`
+
+## 执行
+
+### 1. 扩展事件数据
+
+在 `SessionEvent::ResourceStats` 中增加：
+
+```rust
+processes: Vec<RemoteProcess>,
+```
+
+新增结构：
+
+```rust
+#[derive(Clone, Debug, Default)]
+pub struct RemoteProcess {
+    pub mem_percent: f32,
+    pub cpu_percent: f32,
+    pub command: String,
+}
+```
+
+### 2. 扩展远程监控命令
+
+在 `MON_CMD` 中追加 ps 输出。建议在 `__DF__` 后或前增加标记：
+
+```bash
+echo __PS__;
+ps -eo pmem,pcpu,comm --sort=-pmem 2>/dev/null | head -n 21;
+```
+
+完整命令要继续保留固定 PATH：
+
+```rust
+const MON_CMD: &[u8] = b"PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; while :; do awk '/^cpu /{print}' /proc/stat; awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree):/{print}' /proc/meminfo; cat /proc/net/dev; echo __DF__; df -kP 2>/dev/null; echo __PS__; ps -eo pmem,pcpu,comm --sort=-pmem 2>/dev/null | head -n 21; echo __MSTICK__; sleep 2; done\n";
+```
+
+### 3. 解析 `__PS__`
+
+在 `parse_monitor_block` 中增加状态：
+
+```rust
+let mut in_ps = false;
+let mut processes = Vec::new();
+```
+
+遇到 `__PS__` 后解析：
+
+```rust
+fn parse_ps_line(line: &str) -> Option<RemoteProcess> {
+    let mut parts = line.split_whitespace();
+    let mem: f32 = parts.next()?.parse().ok()?;
+    let cpu: f32 = parts.next()?.parse().ok()?;
+    let command = parts.collect::<Vec<_>>().join(" ");
+    if command.is_empty() || command == "COMMAND" {
+        return None;
+    }
+    Some(RemoteProcess {
+        mem_percent: mem,
+        cpu_percent: cpu,
+        command,
+    })
+}
+```
+
+限制最多 20 条。
+
+### 4. UI 表头排序
+
+`ui/sidebar.slint` 增加：
+
+```slint
+in property <[ProcessInfo]> processes;
+in-out property <string> process-sort-key: "mem";
+callback process-sort-changed(string);
+```
+
+`ProcessInfo`：
+
+```slint
+export struct ProcessInfo {
+    mem: string,
+    cpu: string,
+    command: string,
+}
+```
+
+点击表头：
+
+```slint
+TouchArea { clicked => { root.process-sort-changed("mem"); } }
+TouchArea { clicked => { root.process-sort-changed("cpu"); } }
+```
+
+排序可在 Rust 中做，避免 Slint 复杂逻辑。
+
+## 验收
+
+- 连接 Linux SSH 后，侧边栏显示进程表。
+- 默认按内存降序。
+- 点击 CPU 表头后按 CPU 降序。
+- 非 Linux 或 ps 不可用时不崩溃，只显示空表。
+- 最多显示 20 条左右。
+
+---
+
+# step-026：侧边栏和底部窗格增加快速平移动画
+
+## 类型
+
+新增功能。
+
+## 目标
+
+侧边栏和底部窗格展开/收起有轻快动画，避免生硬切换。
+
+## 修改文件
+
+- `ui/app.slint`
+- `ui/sidebar.slint`
+- `ui/bottom_panel.slint`
+
+## 执行
+
+### 1. 侧边栏动画
+
+当前：
+
+```slint
+Sidebar {
+    visible: root.sidebar-visible;
+    width: root.sidebar-visible ? 220px : 0px;
+}
+```
+
+改为不要直接 `visible=false` 销毁布局，使用宽度动画：
+
+```slint
+Sidebar {
+    width: root.sidebar-visible ? 220px : 0px;
+    clip: true;
+    animate width { duration: 140ms; easing: ease-out; }
+}
+```
+
+如果 `clip` 不支持或导致编译问题，删除 `clip`，但保留 width animation。
+
+### 2. 底部窗格动画
+
+同理，把底部窗格高度改为：
+
+```slint
+height: root.bottom-panel-visible ? 180px : 0px;
+animate height { duration: 140ms; easing: ease-out; }
+```
+
+不要在动画时销毁内部组件。
+
+## 验收
+
+- 侧边栏展开/收起有快速平移动画。
+- 底部窗格展开/收起有快速动画。
+- 终端区域随布局重排正常。
+- 切换 tab 不丢失底部窗格状态。
+
+---
+
+# step-027：最终验证和整理
+
+## 类型
+
+收尾。
+
+## 目标
+
+确认本轮迁移和新增功能没有破坏主流程。
+
+## 修改文件
+
+按实际修复情况修改，不新增大功能。
+
+## 验证清单
+
+### 基础启动
+
+```bash
+cargo fmt
+cargo check
+cargo test
+cargo run
+```
+
+### 上游回归
+
+- 主题可切换或可跟随系统。
+- 终端字体可设置。
+- 终端字号可设置。
+- 重启后字体/字号生效。
+- SFTP 可上传文件夹。
+- SFTP 可下载文件夹。
+- SFTP 可递归删除文件夹。
+- 粘贴多行命令正常。
+- 单独按 Alt 不影响命令行。
+- Wayland 下复制/粘贴不回退。
+
+### dev bug
+
+- debug 启动不重复输出 ICU4X ja 错误。
+- 菜单栏在标签页上方。
+- tooltip 不被遮挡；如果暂时禁用 tooltip，也不能显示被遮挡的 tooltip。
+- 欢迎页点击文件/隧道/断开/重连均提示“请先连接一个会话”。
+- Alacritty 普通页面可滚轮翻页。
+- htop/vim/less 中滚轮仍正常。
+
+### 文件传输窗口
+
+- 应用内最多一个文件传输窗口。
+- 同一会话不会重复创建远程 tab。
+- 不同会话可新增多个远程 tab。
+- 双击远程 tab 可重新连接。
+- 底部传输记录能显示任务。
+- 本地/远程右键菜单可用。
+- 文件夹传输可用。
+- 文件列表显示名称、大小、类型、修改时间、属性、所有者。
+
+### 隧道
+
+- Add 按钮已移除。
+- 右键菜单可添加、编辑、删除、挂起、继续。
+- 无连接时提示“请先连接一个会话”。
+- 挂起不删除规则。
+- 继续能恢复规则。
+
+### 侧边栏
+
+- 服务器资源下方显示进程表。
+- 内存排序可用。
+- CPU 排序可用。
+- 侧边栏动画正常。
+- 底部窗格动画正常。
+
+## 最终提交建议
+
+如果分阶段 commit，建议提交名：
+
+```text
+step-001: establish dev baseline
+step-002: add upstream ui setting dependencies
+step-003: add theme font and group config fields
+step-004: wire theme and terminal font settings
+step-005: add terminal font controls to slint ui
+step-006: port recursive sftp folder operations
+step-007: sanitize remote filenames for local writes
+step-008: port terminal paste and alt-key fixes
+step-009: harden remote resource monitor
+step-010: hide shell integration prompt command echo
+step-011: port session grouping and import export basics
+step-012: normalize unsupported locales
+step-013: move top action bar above tabs
+step-014: fix tooltip layering
+step-015: add active session guard
+step-016: fix alacritty scrollback wheel
+step-017: make transfer window singleton
+step-018: add remote tabs to transfer window
+step-019: reconnect transfer tabs by double click
+step-020: show transfer records in transfer window
+step-021: add transfer window context menus
+step-022: reuse recursive sftp for folder transfer window
+step-023: show extended file metadata
+step-024: manage tunnels from context menu
+step-025: add remote process monitor table
+step-026: animate sidebar and bottom panel
+step-027: final verification
+```
