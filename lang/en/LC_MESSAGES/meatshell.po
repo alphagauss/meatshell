@@ -224,3 +224,9 @@ msgstr "Suspend"
 
 msgid "Resume"
 msgstr "Resume"
+
+msgid "Processes"
+msgstr "Processes"
+
+msgid "Command"
+msgstr "Command"

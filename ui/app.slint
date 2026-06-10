@@ -10,7 +10,7 @@ import "fonts/CascadiaMono-Bold.ttf";
 import "fonts/MaterialIcons-Regular.ttf";
 
 import { Theme } from "theme.slint";
-import { Sidebar, DiskInfo } from "sidebar.slint";
+import { Sidebar, DiskInfo, ProcessInfo } from "sidebar.slint";
 import { TabBar, TabInfo } from "tabs.slint";
 import { TopActionBar } from "top_action_bar.slint";
 import { Welcome, SessionInfo } from "welcome.slint";
@@ -83,7 +83,10 @@ export component AppWindow inherits Window {
     in property <string> net-selected;      // currently selected NIC
     in property <bool> net-show-selector;   // only on a live session tab
     in property <[DiskInfo]> disks;         // active tab's filesystem usage
+    in property <[ProcessInfo]> processes;  // active tab's remote process list
+    in-out property <string> process-sort-key: "mem";
     callback select-net-iface(string);
+    callback process-sort-changed(string);
 
     // --- Top-right popups --------------------------------------------------
     in-out property <bool> download-open: false;  // download manager popup
@@ -236,7 +239,10 @@ export component AppWindow inherits Window {
             net-selected: root.net-selected;
             net-show-selector: root.net-show-selector;
             disks: root.disks;
+            processes: root.processes;
+            process-sort-key <=> root.process-sort-key;
             select-net-iface(i) => { root.select-net-iface(i); }
+            process-sort-changed(key) => { root.process-sort-changed(key); }
         }
 
         // Right side: top action bar + tabs + content

@@ -8,6 +8,12 @@ export struct DiskInfo {
     percent: float,   // used fraction 0.0..1.0
 }
 
+export struct ProcessInfo {
+    mem: string,
+    cpu: string,
+    command: string,
+}
+
 // --- StatRow ---------------------------------------------------------------
 // A single label / percentage / progress-bar row used for CPU / memory / swap.
 component StatRow inherits HorizontalLayout {
@@ -209,7 +215,10 @@ export component Sidebar inherits Rectangle {
     in property <string> net-selected;
     in property <bool> net-show-selector;
     in property <[DiskInfo]> disks;
+    in property <[ProcessInfo]> processes;
+    in-out property <string> process-sort-key: "mem";
     callback select-net-iface(string);
+    callback process-sort-changed(string);
 
     width: 220px;
     background: Theme.bg-panel;
@@ -275,6 +284,117 @@ export component Sidebar inherits Rectangle {
                 percent: root.swap-percent;
                 detail: root.swap-detail;
                 bar-color: Theme.warning;
+            }
+        }
+
+        if root.processes.length > 0 : Rectangle { height: 1px; background: Theme.border-subtle; }
+
+        if root.processes.length > 0 : Rectangle {
+            height: 112px;
+
+            VerticalLayout {
+                spacing: 3px;
+
+                Text {
+                    text: @tr("Processes");
+                    color: Theme.text-secondary;
+                    font-size: Theme.fs-sm;
+                }
+
+                HorizontalLayout {
+                    height: 18px;
+                    padding-left: 6px;
+                    padding-right: 6px;
+                    spacing: 4px;
+
+                    Rectangle {
+                        width: 42px;
+                        height: parent.height;
+                        mem-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.process-sort-changed("mem"); }
+                        }
+                        Text {
+                            text: @tr("Memory");
+                            color: root.process-sort-key == "mem" ? Theme.accent : Theme.text-muted;
+                            font-size: Theme.fs-xs;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 38px;
+                        height: parent.height;
+                        cpu-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.process-sort-changed("cpu"); }
+                        }
+                        Text {
+                            text: "CPU";
+                            color: root.process-sort-key == "cpu" ? Theme.accent : Theme.text-muted;
+                            font-size: Theme.fs-xs;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    Text {
+                        text: @tr("Command");
+                        color: Theme.text-muted;
+                        font-size: Theme.fs-xs;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Flickable {
+                    vertical-stretch: 1;
+                    viewport-width: self.width;
+                    viewport-height: max(self.height, proc-col.preferred-height);
+
+                    proc-col := VerticalLayout {
+                        spacing: 1px;
+                        alignment: start;
+
+                        for process[i] in root.processes : Rectangle {
+                            height: 20px;
+                            border-radius: 2px;
+                            background: mod(i, 2) == 0 ? transparent : #ffffff08;
+
+                            HorizontalLayout {
+                                padding-left: 6px;
+                                padding-right: 6px;
+                                spacing: 4px;
+
+                                Text {
+                                    text: process.mem;
+                                    color: Theme.text-secondary;
+                                    font-size: Theme.fs-xs;
+                                    width: 42px;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: process.cpu;
+                                    color: Theme.text-secondary;
+                                    font-size: Theme.fs-xs;
+                                    width: 38px;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: process.command;
+                                    color: Theme.text-muted;
+                                    font-size: Theme.fs-xs;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

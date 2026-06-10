@@ -342,6 +342,7 @@ pub(super) fn apply_session_event_to_window(
             swap_total_kib,
             net,
             disks,
+            processes,
         } => {
             if let Some(st) = statuses.lock().unwrap().get_mut(tab_id) {
                 st.cpu = cpu_percent;
@@ -351,6 +352,7 @@ pub(super) fn apply_session_event_to_window(
                 st.swap_total_kib = swap_total_kib;
                 st.net = net;
                 st.disks = disks;
+                st.processes = processes;
                 // A sample means the channel is alive → treat as connected.
                 if st.state != 1 {
                     st.state = 1;

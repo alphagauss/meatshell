@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use crate::config::Session;
 use crate::connection::ConnectionManager;
 use crate::sftp::SftpHandle;
+use crate::ssh::RemoteProcess;
 use crate::system::SystemSnapshot;
 use crate::tunnel::TunnelManager;
 
@@ -38,6 +39,10 @@ pub(super) struct TabStatus {
     pub(super) net_hist: Vec<f32>,
     /// Per-filesystem (mount, available_bytes, total_bytes).
     pub(super) disks: Vec<(String, u64, u64)>,
+    /// Latest remote processes shown in the sidebar.
+    pub(super) processes: Vec<RemoteProcess>,
+    /// Current process sort key: "mem" or "cpu".
+    pub(super) process_sort_key: String,
 }
 pub(super) type TabStatuses = Arc<Mutex<HashMap<String, TabStatus>>>;
 /// Last local-machine sample (shown on the welcome tab).

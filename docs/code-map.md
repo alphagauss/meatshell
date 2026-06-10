@@ -166,12 +166,13 @@
 ### `src/app/sidebar.rs`
 职责：
 - 保存侧边栏和底部网络图的计算逻辑
-- 负责把系统采样、tab 状态和网络历史转成 Slint model / 属性
+- 负责把系统采样、tab 状态、远程进程列表和网络历史转成 Slint model / 属性
 
 关键符号：
 - `push_ring(...)`
 - `normalized_model(...)`
 - `disk_model(...)`
+- `process_model(...)`
 - `selected_iface(...)`
 - `refresh_sidebar(...)`
 
@@ -245,7 +246,7 @@
 ### `src/app/types.rs`
 职责：
 - 保存 app 作用域内的状态别名和轻量结构体，供 `src/app/mod.rs` 和后续 app 子模块复用
-- 现在只放连接 / SFTP / 隧道 / 终端缓冲区相关的别名、tab 状态、单例传输窗口状态、传输窗口远程 tab 状态和网卡历史长度常量
+- 现在只放连接 / SFTP / 隧道 / 终端缓冲区相关的别名、tab 状态、单例传输窗口状态、传输窗口远程 tab 状态和网卡历史长度常量；`TabStatus` 同时保存远程资源、进程列表和进程排序 key
 
 关键符号：
 - `TermBuffers`
@@ -393,6 +394,7 @@
 
 关键符号：
 - `RemoteEntry`（SFTP 列表条目，包含类型、权限、所有者、大小和修改时间等展示字段）
+- `RemoteProcess`
 - `RemoteTreeNode`
 - `SessionCommand`
 - `SessionEvent`
@@ -403,6 +405,7 @@
 - `spawn_session(...)`
 - `run_session(...)`
 - `parse_monitor_block(...)`
+- `parse_ps_line(...)`
 - `parse_df_line(...)`
 - `parse_meminfo_kib(...)`
 - `parse_net_dev_line(...)`
@@ -602,6 +605,7 @@
 - `tunnel-update-rule`
 - `tunnel-toggle-rule`
 - `tunnel-delete-rule`
+- `process-sort-changed`
 - `terminal-mouse`
 - `global-tooltip-text`
 - `global-tooltip-x`
@@ -713,11 +717,13 @@
 职责：
 - 左侧状态栏
 - CPU / 内存 / Swap
+- 连接远程会话时显示进程表，内存和 CPU 表头可切换排序
 - 双网络图
 - 磁盘列表
 
 关键符号：
 - `DiskInfo`
+- `ProcessInfo`
 - `StatRow`
 - `NetGraph`
 - `Sidebar`

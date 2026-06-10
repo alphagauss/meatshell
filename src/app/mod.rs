@@ -355,6 +355,25 @@ pub fn run() -> Result<()> {
         });
     }
 
+    {
+        let weak = window.as_weak();
+        let statuses = tab_statuses.clone();
+        let local = local_snap.clone();
+        let net = local_net_hist.clone();
+        window.on_process_sort_changed(move |key: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let active = w.get_active_tab_id().to_string();
+            if let Some(st) = statuses.lock().unwrap().get_mut(&active) {
+                st.process_sort_key = if key.as_str() == "cpu" {
+                    "cpu".to_string()
+                } else {
+                    "mem".to_string()
+                };
+            }
+            refresh_sidebar(&w, &statuses, &local, &net);
+        });
+    }
+
     // Settings: preset download directory (load + pick + open).
     window.set_download_dir(store.borrow().download_dir().to_string().into());
     {

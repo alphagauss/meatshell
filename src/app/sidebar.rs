@@ -3,11 +3,11 @@ use std::rc::Rc;
 use slint::{ModelRc, SharedString, VecModel};
 
 use crate::i18n::t;
-use crate::ssh::format_size;
+use crate::ssh::{format_size, RemoteProcess};
 use crate::system::format_bytes_per_sec;
 
 use super::types::{LocalSnap, NetHist, TabStatus, TabStatuses, NET_HISTORY_LEN};
-use super::{AppWindow, DiskInfo};
+use super::{AppWindow, DiskInfo, ProcessInfo};
 
 /// Push a value into a fixed-length ring buffer (newest at the end).
 pub(super) fn push_ring(buf: &mut Vec<f32>, val: f32) {
@@ -42,6 +42,32 @@ pub(super) fn disk_model(disks: &[(String, u64, u64)]) -> ModelRc<DiskInfo> {
                 detail: format!("{}/{}", format_size(*avail), format_size(*total)).into(),
                 percent,
             }
+        })
+        .collect();
+    ModelRc::from(Rc::new(VecModel::from(rows)))
+}
+
+pub(super) fn process_model(processes: &[RemoteProcess], sort_key: &str) -> ModelRc<ProcessInfo> {
+    let mut rows = processes.to_vec();
+    if sort_key == "cpu" {
+        rows.sort_by(|a, b| {
+            b.cpu_percent
+                .partial_cmp(&a.cpu_percent)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    } else {
+        rows.sort_by(|a, b| {
+            b.mem_percent
+                .partial_cmp(&a.mem_percent)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+    let rows: Vec<ProcessInfo> = rows
+        .into_iter()
+        .map(|process| ProcessInfo {
+            mem: format!("{:.1}%", process.mem_percent).into(),
+            cpu: format!("{:.1}%", process.cpu_percent).into(),
+            command: process.command.into(),
         })
         .collect();
     ModelRc::from(Rc::new(VecModel::from(rows)))
@@ -92,6 +118,8 @@ pub(super) fn refresh_sidebar(
         win.set_net_ifaces(ModelRc::from(Rc::new(VecModel::<SharedString>::default())));
         // Non-connected tabs show the local machine's filesystems.
         win.set_disks(disk_model(&snap.disks));
+        win.set_processes(ModelRc::from(Rc::new(VecModel::<ProcessInfo>::default())));
+        win.set_process_sort_key("mem".into());
     };
     let show_local_res = |win: &AppWindow| {
         win.set_resource_title(t("本机资源", "Local resources").into());
@@ -140,6 +168,13 @@ pub(super) fn refresh_sidebar(
             let ifaces: Vec<SharedString> = st.net.iter().map(|e| e.0.clone().into()).collect();
             win.set_net_ifaces(ModelRc::from(Rc::new(VecModel::from(ifaces))));
             win.set_disks(disk_model(&st.disks));
+            let sort_key = if st.process_sort_key == "cpu" {
+                "cpu"
+            } else {
+                "mem"
+            };
+            win.set_process_sort_key(sort_key.into());
+            win.set_processes(process_model(&st.processes, sort_key));
         }
         // Disconnected / timed-out session.
         Some(st) if st.state == 2 => {

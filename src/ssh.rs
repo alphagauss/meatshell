@@ -49,6 +49,13 @@ pub struct RemoteTreeNode {
     pub has_children: bool,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct RemoteProcess {
+    pub mem_percent: f32,
+    pub cpu_percent: f32,
+    pub command: String,
+}
+
 /// Format a byte count as a human-readable string.
 pub fn format_size(bytes: u64) -> String {
     if bytes < 1_024 {
@@ -183,6 +190,8 @@ pub enum SessionEvent {
         net: Vec<(String, u64, u64)>,
         /// Per-filesystem (mount_point, available_bytes, total_bytes).
         disks: Vec<(String, u64, u64)>,
+        /// Top remote processes from `ps`.
+        processes: Vec<RemoteProcess>,
     },
 
     // --- SFTP events -------------------------------------------------------
@@ -417,7 +426,7 @@ async fn run_session(
     // it into CPU% / mem / swap for the sidebar.  Best-effort: if the channel
     // or exec fails (e.g. a non-Linux host without /proc), monitoring is
     // silently skipped and the interactive shell is unaffected.
-    const MON_CMD: &[u8] = b"PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; while :; do awk '/^cpu /{print}' /proc/stat; awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree):/{print}' /proc/meminfo; cat /proc/net/dev; echo __DF__; df -kP 2>/dev/null; echo __MSTICK__; sleep 2; done\n";
+    const MON_CMD: &[u8] = b"PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; while :; do awk '/^cpu /{print}' /proc/stat; awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree):/{print}' /proc/meminfo; cat /proc/net/dev; echo __DF__; df -kP 2>/dev/null; echo __PS__; ps -eo pmem,pcpu,comm --sort=-pmem 2>/dev/null | head -n 21; echo __MSTICK__; sleep 2; done\n";
     let mut mon_channel = match handle.channel_open_session().await {
         Ok(ch) => match ch.exec(true, MON_CMD).await {
             Ok(()) => Some(ch),
@@ -574,12 +583,29 @@ fn parse_monitor_block(
     let mut net_now: Vec<(String, u64, u64)> = Vec::new();
     // Filesystems from `df -kP`: (mount, available_bytes, total_bytes).
     let mut disks: Vec<(String, u64, u64)> = Vec::new();
+    let mut processes: Vec<RemoteProcess> = Vec::new();
     let mut in_df = false;
+    let mut in_ps = false;
     const MAX_MON_ENTRIES: usize = 64;
+    const MAX_PROCESSES: usize = 20;
 
     for line in block.lines() {
         if line == "__DF__" {
             in_df = true;
+            in_ps = false;
+            continue;
+        }
+        if line == "__PS__" {
+            in_df = false;
+            in_ps = true;
+            continue;
+        }
+        if in_ps {
+            if processes.len() < MAX_PROCESSES {
+                if let Some(process) = parse_ps_line(line) {
+                    processes.push(process);
+                }
+            }
             continue;
         }
         if in_df {
@@ -669,6 +695,22 @@ fn parse_monitor_block(
         swap_total_kib: swap_total,
         net,
         disks,
+        processes,
+    })
+}
+
+fn parse_ps_line(line: &str) -> Option<RemoteProcess> {
+    let mut parts = line.split_whitespace();
+    let mem_percent: f32 = parts.next()?.parse().ok()?;
+    let cpu_percent: f32 = parts.next()?.parse().ok()?;
+    let command = parts.collect::<Vec<_>>().join(" ");
+    if command.is_empty() || command == "COMMAND" {
+        return None;
+    }
+    Some(RemoteProcess {
+        mem_percent,
+        cpu_percent,
+        command,
     })
 }
 
@@ -757,7 +799,7 @@ fn _assert_handle_send() {
 
 #[cfg(test)]
 mod monitor_hardening_tests {
-    use super::{parse_df_line, parse_monitor_block};
+    use super::{parse_df_line, parse_monitor_block, parse_ps_line, SessionEvent};
     use std::collections::HashMap;
     use std::time::Instant;
 
@@ -791,5 +833,29 @@ mod monitor_hardening_tests {
         let mut at = Instant::now();
         assert!(parse_monitor_block(&block, &mut prev, &mut prev_net, &mut at).is_some());
         assert!(prev_net.len() <= 64, "prev_net held {}", prev_net.len());
+    }
+
+    #[test]
+    fn ps_lines_are_parsed_and_capped() {
+        let parsed = parse_ps_line("12.5 3.0 sshd").expect("parses ps line");
+        assert_eq!(parsed.command, "sshd");
+        assert_eq!(parsed.mem_percent, 12.5);
+        assert_eq!(parsed.cpu_percent, 3.0);
+
+        let mut block = String::from("MemTotal: 1000 kB\nMemAvailable: 500 kB\n__PS__\n");
+        for i in 0..40 {
+            block.push_str(&format!("1.0 2.0 proc{i}\n"));
+        }
+        let mut prev = None;
+        let mut prev_net = HashMap::new();
+        let mut at = Instant::now();
+        let stats = parse_monitor_block(&block, &mut prev, &mut prev_net, &mut at);
+        match stats {
+            Some(SessionEvent::ResourceStats { processes, .. }) => {
+                assert_eq!(processes.len(), 20);
+                assert_eq!(processes[0].command, "proc0");
+            }
+            other => panic!("unexpected stats: {other:?}"),
+        }
     }
 }
