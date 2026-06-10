@@ -107,8 +107,11 @@ export component TerminalView inherits Rectangle {
     callback sftp-view(string);
     callback sftp-edit(string);
     callback tunnel-add-rule();
+    callback tunnel-create-rule(string, string, string, string, string);
     callback tunnel-update-rule(string, string, string, string, string, string);
     callback tunnel-toggle-rule(string, bool);
+    callback tunnel-suspend-rule(string);
+    callback tunnel-resume-rule(string);
     callback tunnel-delete-rule(string);
     callback paste-from-clipboard();
     callback copy-terminal-text();
@@ -684,10 +687,15 @@ export component TerminalView inherits Rectangle {
             view(path)          => { root.sftp-view(path); }
             edit(path)          => { root.sftp-edit(path); }
             tunnel-add-rule => { root.tunnel-add-rule(); }
+            tunnel-create-rule(name, lh, lp, rh, rp) => {
+                root.tunnel-create-rule(name, lh, lp, rh, rp);
+            }
             tunnel-update-rule(id, name, lh, lp, rh, rp) => {
                 root.tunnel-update-rule(id, name, lh, lp, rh, rp);
             }
             tunnel-toggle-rule(id, enabled) => { root.tunnel-toggle-rule(id, enabled); }
+            tunnel-suspend-rule(id) => { root.tunnel-suspend-rule(id); }
+            tunnel-resume-rule(id) => { root.tunnel-resume-rule(id); }
             tunnel-delete-rule(id) => { root.tunnel-delete-rule(id); }
         }
     }

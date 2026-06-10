@@ -4,6 +4,8 @@ export struct TunnelRuleInfo {
     id: string,
     name: string,
     enabled: bool,
+    direction: string,
+    suspended: bool,
     local-host: string,
     local-port: string,
     remote-host: string,
@@ -38,6 +40,37 @@ component SmallButton inherits Rectangle {
         font-size: Theme.fs-sm;
         horizontal-alignment: center;
         vertical-alignment: center;
+    }
+}
+
+component MenuItem inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <bool> danger: false;
+    callback clicked();
+
+    height: 26px;
+    border-radius: Theme.radius-sm;
+    background: root.enabled && ta.has-hover ? Theme.bg-hover : transparent;
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            if (root.enabled) {
+                root.clicked();
+            }
+        }
+    }
+
+    Text {
+        x: 10px;
+        text: root.label;
+        color: root.enabled
+            ? (root.danger ? Theme.danger : Theme.text-primary)
+            : Theme.text-muted;
+        font-size: Theme.fs-sm;
+        vertical-alignment: center;
+        height: parent.height;
     }
 }
 
@@ -77,11 +110,31 @@ component Field inherits Rectangle {
 
 export component TunnelPanel inherits Rectangle {
     in property <[TunnelRuleInfo]> rules: [];
+    in-out property <string> selected-rule-id: "";
+    in-out property <bool> menu-open: false;
+
+    property <bool> dialog-open: false;
+    property <string> dialog-title: "";
+    property <string> dialog-rule-id: "";
+    property <string> dialog-name: "";
+    property <string> dialog-local-host: "";
+    property <string> dialog-local-port: "";
+    property <string> dialog-remote-host: "";
+    property <string> dialog-remote-port: "";
 
     callback add-rule();
+    callback create-rule(string, string, string, string, string);
     callback update-rule(string, string, string, string, string, string);
     callback toggle-rule(string, bool);
+    callback suspend-rule(string);
+    callback resume-rule(string);
     callback delete-rule(string);
+
+    callback menu-add();
+    callback menu-edit(string);
+    callback menu-delete(string);
+    callback menu-suspend(string);
+    callback menu-resume(string);
 
     background: Theme.bg-panel;
 
@@ -89,34 +142,73 @@ export component TunnelPanel inherits Rectangle {
         padding: 10px;
         spacing: 8px;
 
-        HorizontalLayout {
+        Rectangle {
             height: 28px;
-            spacing: 8px;
-
             Text {
                 text: @tr("Local forward rules");
                 color: Theme.text-primary;
                 font-size: Theme.fs-md;
                 font-weight: 600;
                 vertical-alignment: center;
-                horizontal-stretch: 1;
-            }
-
-            SmallButton {
-                text: @tr("Add");
-                primary: true;
-                clicked => { root.add-rule(); }
             }
         }
 
-        if root.rules.length == 0 : Rectangle {
+        if root.rules.length == 0 : empty := Rectangle {
             vertical-stretch: 1;
+            property <length> mx;
+            property <length> my;
+
+            empty-ta := TouchArea {
+                mouse-cursor: pointer;
+                pointer-event(ev) => {
+                    if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) {
+                        root.selected-rule-id = "";
+                        root.menu-open = true;
+                        empty.mx = self.mouse-x;
+                        empty.my = self.mouse-y;
+                        add-menu.show();
+                    }
+                }
+            }
+
             Text {
                 text: @tr("No tunnel rules for this session.");
                 color: Theme.text-muted;
                 font-size: Theme.fs-md;
                 horizontal-alignment: center;
                 vertical-alignment: center;
+            }
+
+            add-menu := PopupWindow {
+                x: empty.mx;
+                y: empty.my;
+                width: 118px;
+                height: 34px;
+                Rectangle {
+                    background: Theme.bg-panel;
+                    border-radius: Theme.radius-sm;
+                    border-width: 1px;
+                    border-color: Theme.border-strong;
+                    drop-shadow-blur: 12px;
+                    drop-shadow-color: #00000060;
+                    VerticalLayout {
+                        padding: 4px;
+                        MenuItem {
+                            label: @tr("Add");
+                            clicked => {
+                                root.menu-add();
+                                root.dialog-title = @tr("Add tunnel");
+                                root.dialog-rule-id = "";
+                                root.dialog-name = @tr("Local forward");
+                                root.dialog-local-host = "127.0.0.1";
+                                root.dialog-local-port = "";
+                                root.dialog-remote-host = "127.0.0.1";
+                                root.dialog-remote-port = "80";
+                                root.dialog-open = true;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -129,102 +221,293 @@ export component TunnelPanel inherits Rectangle {
                 spacing: 8px;
                 alignment: start;
 
-                for rule in root.rules : Rectangle {
-                    property <string> edit-name: rule.name;
-                    property <string> edit-local-host: rule.local-host;
-                    property <string> edit-local-port: rule.local-port;
-                    property <string> edit-remote-host: rule.remote-host;
-                    property <string> edit-remote-port: rule.remote-port;
+                for rule in root.rules : row := Rectangle {
+                    property <length> mx;
+                    property <length> my;
 
-                    height: 116px;
+                    height: 72px;
                     border-radius: Theme.radius-sm;
                     border-width: 1px;
-                    border-color: Theme.border-subtle;
-                    background: Theme.bg-root;
+                    border-color: rule.suspended ? Theme.warning : Theme.border-subtle;
+                    background: row-ta.has-hover ? Theme.bg-hover : Theme.bg-root;
+
+                    row-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        pointer-event(ev) => {
+                            if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) {
+                                root.selected-rule-id = rule.id;
+                                root.menu-open = true;
+                                row.mx = self.mouse-x;
+                                row.my = self.mouse-y;
+                                row-menu.show();
+                            }
+                        }
+                    }
 
                     VerticalLayout {
                         padding: 8px;
-                        spacing: 7px;
+                        spacing: 5px;
 
                         HorizontalLayout {
                             spacing: 8px;
-
-                            Field {
+                            Text {
+                                text: rule.name;
+                                color: Theme.text-primary;
+                                font-size: Theme.fs-sm;
+                                font-weight: 600;
                                 horizontal-stretch: 1;
-                                placeholder: @tr("Name");
-                                value <=> edit-name;
+                                overflow: elide;
+                                vertical-alignment: center;
                             }
-
                             Text {
                                 text: rule.status;
                                 color: rule.status-kind == 2 ? Theme.success
                                     : rule.status-kind == 4 ? Theme.danger
                                     : rule.status-kind == 3 ? Theme.warning
-                                    : Theme.text-muted;
-                                font-size: Theme.fs-sm;
+                                    : (rule.suspended ? Theme.warning : Theme.text-muted);
+                                font-size: Theme.fs-xs;
                                 vertical-alignment: center;
                                 overflow: elide;
                             }
                         }
 
                         HorizontalLayout {
-                            spacing: 6px;
-                            Field {
-                                horizontal-stretch: 1;
-                                placeholder: "127.0.0.1";
-                                value <=> edit-local-host;
-                            }
-                            Field {
-                                width: 68px;
-                                placeholder: "8080";
-                                value <=> edit-local-port;
-                            }
+                            spacing: 8px;
                             Text {
-                                text: "\u{E5C8}";
-                                font-family: "Material Icons";
+                                text: @tr("Local forward");
                                 color: Theme.text-muted;
-                                font-size: Theme.fs-md;
+                                font-size: Theme.fs-xs;
+                                width: 86px;
                                 vertical-alignment: center;
                             }
-                            Field {
+                            Text {
+                                text: rule.local-host + ":" + rule.local-port + " -> " + rule.remote-host + ":" + rule.remote-port;
+                                color: Theme.text-secondary;
+                                font-size: Theme.fs-xs;
                                 horizontal-stretch: 1;
-                                placeholder: "127.0.0.1";
-                                value <=> edit-remote-host;
-                            }
-                            Field {
-                                width: 68px;
-                                placeholder: "80";
-                                value <=> edit-remote-port;
+                                overflow: elide;
+                                vertical-alignment: center;
                             }
                         }
+                    }
 
-                        HorizontalLayout {
-                            spacing: 6px;
-                            Rectangle { horizontal-stretch: 1; }
-                            SmallButton {
-                                text: @tr("Save");
-                                clicked => {
-                                    root.update-rule(
-                                        rule.id,
-                                        edit-name,
-                                        edit-local-host,
-                                        edit-local-port,
-                                        edit-remote-host,
-                                        edit-remote-port
-                                    );
+                    row-menu := PopupWindow {
+                        x: row.mx;
+                        y: row.my;
+                        width: 118px;
+                        height: 5 * 27px + 8px;
+                        Rectangle {
+                            background: Theme.bg-panel;
+                            border-radius: Theme.radius-sm;
+                            border-width: 1px;
+                            border-color: Theme.border-strong;
+                            drop-shadow-blur: 12px;
+                            drop-shadow-color: #00000060;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 1px;
+                                MenuItem {
+                                    label: @tr("Edit");
+                                    clicked => {
+                                        root.menu-edit(rule.id);
+                                        root.dialog-title = @tr("Edit tunnel");
+                                        root.dialog-rule-id = rule.id;
+                                        root.dialog-name = rule.name;
+                                        root.dialog-local-host = rule.local-host;
+                                        root.dialog-local-port = rule.local-port;
+                                        root.dialog-remote-host = rule.remote-host;
+                                        root.dialog-remote-port = rule.remote-port;
+                                        root.dialog-open = true;
+                                    }
+                                }
+                                MenuItem {
+                                    label: @tr("Suspend");
+                                    enabled: rule.status-kind == 2 && !rule.suspended;
+                                    clicked => {
+                                        root.menu-suspend(rule.id);
+                                        root.suspend-rule(rule.id);
+                                    }
+                                }
+                                MenuItem {
+                                    label: @tr("Resume");
+                                    enabled: rule.suspended;
+                                    clicked => {
+                                        root.menu-resume(rule.id);
+                                        root.resume-rule(rule.id);
+                                    }
+                                }
+                                MenuItem {
+                                    label: @tr("Delete");
+                                    danger: true;
+                                    clicked => {
+                                        root.menu-delete(rule.id);
+                                        root.delete-rule(rule.id);
+                                    }
                                 }
                             }
-                            SmallButton {
-                                text: rule.enabled ? @tr("Disable") : @tr("Enable");
-                                primary: !rule.enabled;
-                                clicked => { root.toggle-rule(rule.id, !rule.enabled); }
-                            }
-                            SmallButton {
-                                text: @tr("Delete");
-                                danger: true;
-                                clicked => { root.delete-rule(rule.id); }
+                        }
+                    }
+                }
+
+                blank := Rectangle {
+                    height: 48px;
+                    property <length> mx;
+                    property <length> my;
+
+                    blank-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        pointer-event(ev) => {
+                            if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right) {
+                                root.selected-rule-id = "";
+                                root.menu-open = true;
+                                blank.mx = self.mouse-x;
+                                blank.my = self.mouse-y;
+                                blank-menu.show();
                             }
                         }
+                    }
+
+                    blank-menu := PopupWindow {
+                        x: blank.mx;
+                        y: blank.my;
+                        width: 118px;
+                        height: 34px;
+                        Rectangle {
+                            background: Theme.bg-panel;
+                            border-radius: Theme.radius-sm;
+                            border-width: 1px;
+                            border-color: Theme.border-strong;
+                            drop-shadow-blur: 12px;
+                            drop-shadow-color: #00000060;
+                            VerticalLayout {
+                                padding: 4px;
+                                MenuItem {
+                                    label: @tr("Add");
+                                    clicked => {
+                                        root.menu-add();
+                                        root.dialog-title = @tr("Add tunnel");
+                                        root.dialog-rule-id = "";
+                                        root.dialog-name = @tr("Local forward");
+                                        root.dialog-local-host = "127.0.0.1";
+                                        root.dialog-local-port = "";
+                                        root.dialog-remote-host = "127.0.0.1";
+                                        root.dialog-remote-port = "80";
+                                        root.dialog-open = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.dialog-open : Rectangle {
+        width: root.width > 430px ? 410px : root.width - 20px;
+        height: 238px;
+        x: (root.width - self.width) / 2;
+        y: 38px;
+        border-radius: Theme.radius-md;
+        border-width: 1px;
+        border-color: Theme.border-strong;
+        background: Theme.bg-panel;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000080;
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+
+            Text {
+                text: root.dialog-title;
+                color: Theme.text-primary;
+                font-size: Theme.fs-md;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+
+            HorizontalLayout {
+                height: 24px;
+                spacing: 8px;
+                Text {
+                    text: @tr("Direction");
+                    color: Theme.text-muted;
+                    font-size: Theme.fs-xs;
+                    width: 76px;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: @tr("Local forward");
+                    color: Theme.text-primary;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+            }
+
+            Field {
+                placeholder: @tr("Name");
+                value <=> root.dialog-name;
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+                Field {
+                    horizontal-stretch: 1;
+                    placeholder: "127.0.0.1";
+                    value <=> root.dialog-local-host;
+                }
+                Field {
+                    width: 76px;
+                    placeholder: "8080";
+                    value <=> root.dialog-local-port;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+                Field {
+                    horizontal-stretch: 1;
+                    placeholder: "127.0.0.1";
+                    value <=> root.dialog-remote-host;
+                }
+                Field {
+                    width: 76px;
+                    placeholder: "80";
+                    value <=> root.dialog-remote-port;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+                Rectangle { horizontal-stretch: 1; }
+                SmallButton {
+                    text: @tr("Cancel");
+                    clicked => { root.dialog-open = false; }
+                }
+                SmallButton {
+                    text: root.dialog-rule-id == "" ? @tr("Create") : @tr("Save");
+                    primary: true;
+                    clicked => {
+                        if (root.dialog-rule-id == "") {
+                            root.create-rule(
+                                root.dialog-name,
+                                root.dialog-local-host,
+                                root.dialog-local-port,
+                                root.dialog-remote-host,
+                                root.dialog-remote-port
+                            );
+                        } else {
+                            root.update-rule(
+                                root.dialog-rule-id,
+                                root.dialog-name,
+                                root.dialog-local-host,
+                                root.dialog-local-port,
+                                root.dialog-remote-host,
+                                root.dialog-remote-port
+                            );
+                        }
+                        root.dialog-open = false;
                     }
                 }
             }

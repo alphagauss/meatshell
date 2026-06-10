@@ -45,8 +45,11 @@ export component BottomPanel inherits Rectangle {
     callback view(string);
     callback edit(string);
     callback tunnel-add-rule();
+    callback tunnel-create-rule(string, string, string, string, string);
     callback tunnel-update-rule(string, string, string, string, string, string);
     callback tunnel-toggle-rule(string, bool);
+    callback tunnel-suspend-rule(string);
+    callback tunnel-resume-rule(string);
     callback tunnel-delete-rule(string);
 
     background: Theme.bg-panel;
@@ -102,10 +105,15 @@ export component BottomPanel inherits Rectangle {
             vertical-stretch: 1;
             rules: root.tunnel-rules;
             add-rule => { root.tunnel-add-rule(); }
+            create-rule(name, lh, lp, rh, rp) => {
+                root.tunnel-create-rule(name, lh, lp, rh, rp);
+            }
             update-rule(id, name, lh, lp, rh, rp) => {
                 root.tunnel-update-rule(id, name, lh, lp, rh, rp);
             }
             toggle-rule(id, enabled) => { root.tunnel-toggle-rule(id, enabled); }
+            suspend-rule(id) => { root.tunnel-suspend-rule(id); }
+            resume-rule(id) => { root.tunnel-resume-rule(id); }
             delete-rule(id) => { root.tunnel-delete-rule(id); }
         }
     }

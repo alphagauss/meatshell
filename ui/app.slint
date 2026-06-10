@@ -187,8 +187,11 @@ export component AppWindow inherits Window {
 
     // --- Tunnel callbacks -------------------------------------------------
     callback tunnel-add-rule();
+    callback tunnel-create-rule(string /* name */, string /* local-host */, string /* local-port */, string /* remote-host */, string /* remote-port */);
     callback tunnel-update-rule(string /* id */, string /* name */, string /* local-host */, string /* local-port */, string /* remote-host */, string /* remote-port */);
     callback tunnel-toggle-rule(string /* id */, bool /* enabled */);
+    callback tunnel-suspend-rule(string /* id */);
+    callback tunnel-resume-rule(string /* id */);
     callback tunnel-delete-rule(string /* id */);
 
     // --- Clipboard callbacks ----------------------------------------------
@@ -328,10 +331,15 @@ export component AppWindow inherits Window {
                     sftp-view(path) => { root.sftp-view(term.id, path); }
                     sftp-edit(path) => { root.sftp-edit(term.id, path); }
                     tunnel-add-rule => { root.tunnel-add-rule(); }
+                    tunnel-create-rule(name, lh, lp, rh, rp) => {
+                        root.tunnel-create-rule(name, lh, lp, rh, rp);
+                    }
                     tunnel-update-rule(id, name, lh, lp, rh, rp) => {
                         root.tunnel-update-rule(id, name, lh, lp, rh, rp);
                     }
                     tunnel-toggle-rule(id, enabled) => { root.tunnel-toggle-rule(id, enabled); }
+                    tunnel-suspend-rule(id) => { root.tunnel-suspend-rule(id); }
+                    tunnel-resume-rule(id) => { root.tunnel-resume-rule(id); }
                     tunnel-delete-rule(id) => { root.tunnel-delete-rule(id); }
                     paste-from-clipboard() => { root.paste-from-clipboard(term.id); }
                     copy-terminal-text() => { root.copy-terminal-text(term.id); }

@@ -200,3 +200,27 @@ msgstr "Attributes"
 
 msgid "Owner"
 msgstr "Owner"
+
+msgid "Local forward rules"
+msgstr "Local forward rules"
+
+msgid "No tunnel rules for this session."
+msgstr "No tunnel rules for this session."
+
+msgid "Add tunnel"
+msgstr "Add tunnel"
+
+msgid "Edit tunnel"
+msgstr "Edit tunnel"
+
+msgid "Local forward"
+msgstr "Local forward"
+
+msgid "Direction"
+msgstr "Direction"
+
+msgid "Suspend"
+msgstr "Suspend"
+
+msgid "Resume"
+msgstr "Resume"

@@ -200,3 +200,27 @@ msgstr "属性"
 
 msgid "Owner"
 msgstr "所有者"
+
+msgid "Local forward rules"
+msgstr "本地转发规则"
+
+msgid "No tunnel rules for this session."
+msgstr "当前会话没有隧道规则。"
+
+msgid "Add tunnel"
+msgstr "添加隧道"
+
+msgid "Edit tunnel"
+msgstr "编辑隧道"
+
+msgid "Local forward"
+msgstr "本地转发"
+
+msgid "Direction"
+msgstr "方向"
+
+msgid "Suspend"
+msgstr "挂起"
+
+msgid "Resume"
+msgstr "继续"

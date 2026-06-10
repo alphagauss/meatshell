@@ -23,12 +23,30 @@ use tokio::task::{JoinHandle, JoinSet};
 use crate::config::{AuthMethod, Session};
 use crate::i18n::t;
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TunnelDirection {
+    Local,
+    Remote,
+    Dynamic,
+}
+
+impl Default for TunnelDirection {
+    fn default() -> Self {
+        Self::Local
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TunnelRule {
     pub id: String,
     pub session_id: String,
     pub name: String,
     pub enabled: bool,
+    #[serde(default)]
+    pub direction: TunnelDirection,
+    #[serde(default)]
+    pub suspended: bool,
     pub local_host: String,
     pub local_port: u16,
     pub remote_host: String,
@@ -73,6 +91,8 @@ pub struct TunnelView {
     pub id: String,
     pub name: String,
     pub enabled: bool,
+    pub direction: TunnelDirection,
+    pub suspended: bool,
     pub local_host: String,
     pub local_port: String,
     pub remote_host: String,
@@ -187,16 +207,23 @@ impl TunnelManager {
                     .get(&rule.id)
                     .cloned()
                     .unwrap_or(TunnelStatus::Stopped);
+                let (status_text, status_kind) = if rule.suspended {
+                    (t("已挂起", "Suspended").to_string(), 0)
+                } else {
+                    (status.text(), status.kind())
+                };
                 TunnelView {
                     id: rule.id.clone(),
                     name: rule.name.clone(),
                     enabled: rule.enabled,
+                    direction: rule.direction.clone(),
+                    suspended: rule.suspended,
                     local_host: rule.local_host.clone(),
                     local_port: rule.local_port.to_string(),
                     remote_host: rule.remote_host.clone(),
                     remote_port: rule.remote_port.to_string(),
-                    status_text: status.text(),
-                    status_kind: status.kind(),
+                    status_text,
+                    status_kind,
                 }
             })
             .collect()
@@ -209,10 +236,53 @@ impl TunnelManager {
             session_id: session_id.to_string(),
             name: t("本地转发", "Local forward").to_string(),
             enabled: false,
+            direction: TunnelDirection::Local,
+            suspended: false,
             local_host: "127.0.0.1".to_string(),
             local_port,
             remote_host: "127.0.0.1".to_string(),
             remote_port: 80,
+        };
+        self.statuses.insert(rule.id.clone(), TunnelStatus::Stopped);
+        self.rules.push(rule.clone());
+        self.save()?;
+        Ok(rule)
+    }
+
+    pub fn create_rule(
+        &mut self,
+        session_id: &str,
+        name: String,
+        local_host: String,
+        local_port: String,
+        remote_host: String,
+        remote_port: String,
+    ) -> Result<TunnelRule> {
+        let local_port = if local_port.trim().is_empty() {
+            self.next_local_port(session_id)
+        } else {
+            parse_port(&local_port, t("本地端口无效", "invalid local port"))?
+        };
+        let remote_port = if remote_port.trim().is_empty() {
+            80
+        } else {
+            parse_port(&remote_port, t("远端端口无效", "invalid remote port"))?
+        };
+        let rule = TunnelRule {
+            id: uuid::Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            name: if name.trim().is_empty() {
+                t("本地转发", "Local forward").to_string()
+            } else {
+                name.trim().to_string()
+            },
+            enabled: false,
+            direction: TunnelDirection::Local,
+            suspended: false,
+            local_host: normalize_host(&local_host),
+            local_port,
+            remote_host: normalize_host(&remote_host),
+            remote_port,
         };
         self.statuses.insert(rule.id.clone(), TunnelStatus::Stopped);
         self.rules.push(rule.clone());
@@ -261,11 +331,34 @@ impl TunnelManager {
             return Ok(None);
         };
         rule.enabled = enabled;
+        rule.suspended = false;
         let updated = rule.clone();
         if !enabled {
             self.statuses
                 .insert(rule_id.to_string(), TunnelStatus::Stopped);
         }
+        self.save()?;
+        Ok(Some(updated))
+    }
+
+    pub fn suspend_rule(&mut self, rule_id: &str) -> Result<Option<TunnelRule>> {
+        self.stop_rule(rule_id);
+        let Some(rule) = self.rules.iter_mut().find(|rule| rule.id == rule_id) else {
+            return Ok(None);
+        };
+        rule.suspended = true;
+        let updated = rule.clone();
+        self.save()?;
+        Ok(Some(updated))
+    }
+
+    pub fn resume_rule(&mut self, rule_id: &str) -> Result<Option<TunnelRule>> {
+        let Some(rule) = self.rules.iter_mut().find(|rule| rule.id == rule_id) else {
+            return Ok(None);
+        };
+        rule.enabled = true;
+        rule.suspended = false;
+        let updated = rule.clone();
         self.save()?;
         Ok(Some(updated))
     }
@@ -281,7 +374,12 @@ impl TunnelManager {
         let rules: Vec<_> = self
             .rules
             .iter()
-            .filter(|rule| rule.session_id == session.id && rule.enabled)
+            .filter(|rule| {
+                rule.session_id == session.id
+                    && rule.enabled
+                    && !rule.suspended
+                    && rule.direction == TunnelDirection::Local
+            })
             .cloned()
             .collect();
         for rule in rules {
@@ -290,7 +388,12 @@ impl TunnelManager {
     }
 
     pub fn start_rule(&mut self, runtime: &RuntimeHandle, session: Session, rule: TunnelRule) {
-        if !rule.enabled || rule.session_id != session.id || self.handles.contains_key(&rule.id) {
+        if !rule.enabled
+            || rule.suspended
+            || rule.direction != TunnelDirection::Local
+            || rule.session_id != session.id
+            || self.handles.contains_key(&rule.id)
+        {
             return;
         }
         let (stop_tx, stop_rx) = watch::channel(false);

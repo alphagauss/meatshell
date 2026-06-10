@@ -234,7 +234,7 @@
 职责：
 - 保存隧道面板的 UI glue
 - 负责把 `src/tunnel.rs` 的规则管理和事件泵接到 `ui/tunnel_panel.slint`
-- 隧道新增、保存、启停、删除入口通过 `active_session_or_hint(...)` 阻止欢迎页或无 session tab 修改规则
+- 隧道右键菜单的新增、保存、挂起、继续、删除入口通过 `active_session_or_hint(...)` 阻止欢迎页或无 session tab 修改规则
 
 关键符号：
 - `spawn_tunnel_event_pump(...)`
@@ -313,12 +313,13 @@
 ### `src/tunnel.rs`
 职责：
 - 保存和读取独立的 `tunnels.json`，不把隧道规则塞进 `Session`
-- 定义当前 session 关联的 Local Forward 规则、运行状态和后台任务句柄
+- 定义当前 session 关联的 Local Forward 规则、方向预留字段、挂起状态、运行状态和后台任务句柄
 - 为 enabled 规则启动独立 SSH 连接，通过 `direct-tcpip` 转发本地 TCP 流量
 - 提供 stop/cancel 入口，session 断开、重连或 tab 关闭时释放本地监听端口
 - 通过 `TunnelEvent` 把 Starting / Running / Reconnecting / Failed / Stopped 状态推回 UI
 
 关键符号：
+- `TunnelDirection`
 - `TunnelRule`
 - `TunnelStatus`
 - `TunnelView`
@@ -662,7 +663,7 @@
 ### `ui/tunnel_panel.slint`
 职责：
 - 显示当前 session 的 Local Forward 规则列表
-- 支持新增规则、保存本地/远端地址端口、启用/禁用、删除规则
+- 通过右键菜单管理规则：空白区域添加，规则行编辑、删除、挂起、继续；添加和编辑共用弹窗表单
 - 显示 Stopped / Starting / Running / Reconnecting / Failed 状态
 
 关键符号：

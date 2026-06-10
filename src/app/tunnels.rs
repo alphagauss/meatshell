@@ -64,6 +64,35 @@ pub(super) fn wire_tunnel_callbacks(
         let weak = window.as_weak();
         let connections = connections.clone();
         let tunnels = tunnels.clone();
+        window.on_tunnel_create_rule(
+            move |name, local_host, local_port, remote_host, remote_port| {
+                let Some(w) = weak.upgrade() else { return };
+                let Some((active, session)) = active_session_or_hint(&w, &connections) else {
+                    return;
+                };
+                let result = tunnels.lock().unwrap().create_rule(
+                    &session.id,
+                    name.to_string(),
+                    local_host.to_string(),
+                    local_port.to_string(),
+                    remote_host.to_string(),
+                    remote_port.to_string(),
+                );
+                if let Err(err) = result {
+                    set_terminal_row(&w, &active, |row| {
+                        row.status =
+                            format!("{}: {err:#}", t("新增隧道失败", "Add tunnel failed")).into();
+                    });
+                }
+                refresh_tunnel_panel(&w, &connections, &tunnels);
+            },
+        );
+    }
+
+    {
+        let weak = window.as_weak();
+        let connections = connections.clone();
+        let tunnels = tunnels.clone();
         let runtime = runtime.clone();
         window.on_tunnel_update_rule(
             move |id, name, local_host, local_port, remote_host, remote_port| {
@@ -81,7 +110,7 @@ pub(super) fn wire_tunnel_callbacks(
                 );
                 match result {
                     Ok(Some(rule)) => {
-                        if rule.enabled {
+                        if rule.enabled && !rule.suspended {
                             tunnels
                                 .lock()
                                 .unwrap()
@@ -118,7 +147,7 @@ pub(super) fn wire_tunnel_callbacks(
                 .set_enabled(&id.to_string(), enabled);
             match result {
                 Ok(Some(rule)) => {
-                    if enabled {
+                    if enabled && !rule.suspended {
                         tunnels
                             .lock()
                             .unwrap()
@@ -130,6 +159,56 @@ pub(super) fn wire_tunnel_callbacks(
                     set_terminal_row(&w, &active, |row| {
                         row.status =
                             format!("{}: {err:#}", t("更新隧道失败", "Update tunnel failed"))
+                                .into();
+                    });
+                }
+            }
+            refresh_tunnel_panel(&w, &connections, &tunnels);
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let connections = connections.clone();
+        let tunnels = tunnels.clone();
+        window.on_tunnel_suspend_rule(move |id| {
+            let Some(w) = weak.upgrade() else { return };
+            let Some((active, _session)) = active_session_or_hint(&w, &connections) else {
+                return;
+            };
+            if let Err(err) = tunnels.lock().unwrap().suspend_rule(&id.to_string()) {
+                set_terminal_row(&w, &active, |row| {
+                    row.status =
+                        format!("{}: {err:#}", t("挂起隧道失败", "Suspend tunnel failed")).into();
+                });
+            }
+            refresh_tunnel_panel(&w, &connections, &tunnels);
+        });
+    }
+
+    {
+        let weak = window.as_weak();
+        let connections = connections.clone();
+        let tunnels = tunnels.clone();
+        let runtime = runtime.clone();
+        window.on_tunnel_resume_rule(move |id| {
+            let Some(w) = weak.upgrade() else { return };
+            let Some((active, session)) = active_session_or_hint(&w, &connections) else {
+                return;
+            };
+            let result = tunnels.lock().unwrap().resume_rule(&id.to_string());
+            match result {
+                Ok(Some(rule)) => {
+                    tunnels
+                        .lock()
+                        .unwrap()
+                        .start_rule(runtime.handle(), session, rule);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    set_terminal_row(&w, &active, |row| {
+                        row.status =
+                            format!("{}: {err:#}", t("继续隧道失败", "Resume tunnel failed"))
                                 .into();
                     });
                 }
@@ -179,6 +258,13 @@ pub(super) fn tunnel_view_to_info(view: TunnelView) -> TunnelRuleInfo {
         id: view.id.into(),
         name: view.name.into(),
         enabled: view.enabled,
+        direction: match view.direction {
+            crate::tunnel::TunnelDirection::Local => "local",
+            crate::tunnel::TunnelDirection::Remote => "remote",
+            crate::tunnel::TunnelDirection::Dynamic => "dynamic",
+        }
+        .into(),
+        suspended: view.suspended,
         local_host: view.local_host.into(),
         local_port: view.local_port.into(),
         remote_host: view.remote_host.into(),
