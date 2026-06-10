@@ -374,6 +374,7 @@ pub(super) fn wire_key_input(
                     Ok(text) => {
                         let payload = {
                             let map = bufs.lock().unwrap();
+                            let text = normalize_pasted_newlines(&text);
                             match map.get(&tid) {
                                 Some(buf) => {
                                     clipboard_payload(&text, TerminalEngine::bracketed_paste(buf))
@@ -676,6 +677,18 @@ fn key_to_pty_bytes(key: &str, ctrl: bool, alt: bool, app_cursor: bool) -> Vec<u
         return vec![];
     }
 
+    // Bare modifier keys must never be forwarded to the PTY. Slint may encode
+    // Alt alone as U+0012 with alt=true; treating that as Meta input would send
+    // ESC and make readline discard the current command.
+    if !ctrl {
+        if let Some(c) = key.chars().next() {
+            let cp = c as u32;
+            if key.chars().count() == 1 && (0x10..=0x18).contains(&cp) {
+                return vec![];
+            }
+        }
+    }
+
     // --- Ctrl + letter: synthesise C0 control character --------------------
     // Two cases:
     //   A) Platform already encoded the control char in `key` (e.g. "\x18" for
@@ -735,6 +748,11 @@ fn clipboard_payload(text: &str, bracketed: bool) -> Vec<u8> {
     } else {
         text.as_bytes().to_vec()
     }
+}
+
+/// Normalise pasted text's line endings to a single CR (0x0d).
+fn normalize_pasted_newlines(text: &str) -> String {
+    text.replace("\r\n", "\r").replace('\n', "\r")
 }
 
 fn sgr_mouse_sequence(
@@ -802,7 +820,9 @@ fn c0_letter_key_down(cp: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{clipboard_payload, key_to_pty_bytes, sgr_mouse_sequence};
+    use super::{
+        clipboard_payload, key_to_pty_bytes, normalize_pasted_newlines, sgr_mouse_sequence,
+    };
 
     #[test]
     fn arrow_keys_follow_application_cursor_mode() {
@@ -864,6 +884,27 @@ mod tests {
     fn alt_prefixes_plain_text() {
         assert_eq!(key_to_pty_bytes("x", false, true, false), b"\x1bx");
         assert_eq!(key_to_pty_bytes("!", false, true, false), b"\x1b!");
+    }
+
+    #[test]
+    fn bare_alt_sends_nothing() {
+        assert!(key_to_pty_bytes("\u{0012}", false, true, false).is_empty());
+    }
+
+    #[test]
+    fn ctrl_encoded_c0_still_passes() {
+        assert_eq!(key_to_pty_bytes("\u{0012}", true, false, false), vec![0x12]);
+    }
+
+    #[test]
+    fn paste_normalizes_newlines_to_cr() {
+        assert_eq!(normalize_pasted_newlines("a\nb\nc"), "a\rb\rc");
+        assert_eq!(normalize_pasted_newlines("a\r\nb"), "a\rb");
+        assert_eq!(
+            normalize_pasted_newlines("sudo apt install \\\r\n  docker-ce"),
+            "sudo apt install \\\r  docker-ce"
+        );
+        assert_eq!(normalize_pasted_newlines("echo hi"), "echo hi");
     }
 
     #[test]

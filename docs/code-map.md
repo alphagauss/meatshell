@@ -132,6 +132,7 @@
 - `wire_key_input(...)`
 - `key_to_pty_bytes(...)`
 - `clipboard_payload(...)`
+- `normalize_pasted_newlines(...)`
 - `sgr_mouse_sequence(...)`
 - `is_vk_back_down(...)`
 - `c0_letter_key_down(...)`
