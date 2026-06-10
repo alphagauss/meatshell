@@ -212,11 +212,13 @@
 - 顶部工具栏的打开文件传输入口通过 `active_session_or_hint(...)` 阻止欢迎页误开窗口
 - 文件传输窗口当前是单例：重复打开时复用已有 `TransferWindowState` 并重新 show，关闭按钮和窗口关闭请求只 hide，不销毁 SFTP 状态
 - 文件传输窗口右侧远程区按 SSH session 建 tab；同一 session 复用并激活已有 tab，不同 session 追加 tab，SFTP 事件只更新当前 active remote tab
+- 文件传输窗口远程 tab 双击会替换该 tab 的 SFTP worker，并按该 tab 当前远程路径重新加载
 
 关键符号：
 - `open_transfer_window(...)`
 - `wire_transfer_window_callbacks(...)`
 - `ensure_transfer_remote_tab(...)`
+- `reconnect_transfer_tab(...)`
 - `sync_transfer_remote_tabs(...)`
 - `refresh_transfer_local(...)`
 - `local_entries_model(...)`
@@ -663,7 +665,7 @@
 职责：
 - 独立文件传输窗口外壳
 - 左侧承载 `LocalFilePanel`，右侧承载 `RemoteFilePanel`
-- 右侧远程区顶部显示 remote tab 条，并暴露选择/关闭/重连回调给 Rust
+- 右侧远程区顶部显示 remote tab 条，并暴露选择/关闭/双击重连回调给 Rust
 - 暴露本地/远程导航、刷新、上传、下载、关闭回调给 `src/app/mod.rs`
 
 关键符号：

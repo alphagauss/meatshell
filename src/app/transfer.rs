@@ -51,7 +51,7 @@ pub(super) fn open_transfer_window(
     refresh_transfer_local(&window, default_local_dir(&preferred_local_dir));
 
     let remote_tabs = Rc::new(std::cell::RefCell::new(Vec::new()));
-    wire_transfer_window_callbacks(&window, remote_tabs.clone());
+    wire_transfer_window_callbacks(&window, remote_tabs.clone(), runtime.clone());
     ensure_transfer_remote_tab(&window, remote_tabs.clone(), session, runtime.clone());
     window.window().on_close_requested({
         let weak = window.as_weak();
@@ -267,9 +267,55 @@ fn close_transfer_tab(
     }
 }
 
+fn reconnect_transfer_tab(
+    window: &TransferWindow,
+    remote_tabs: &Rc<std::cell::RefCell<Vec<TransferRemoteTab>>>,
+    runtime: Arc<Runtime>,
+    tab_id: String,
+) {
+    remember_active_remote_path(window, remote_tabs);
+    let active = window.get_active_remote_tab_id().to_string();
+    let reconnect = {
+        let mut tabs = remote_tabs.borrow_mut();
+        let Some(tab) = tabs.iter_mut().find(|tab| tab.id == tab_id) else {
+            return;
+        };
+        let path = if active == tab.id {
+            window.get_remote_path().to_string()
+        } else {
+            tab.remote_path.clone()
+        };
+        let path = if path.is_empty() {
+            "/".to_string()
+        } else {
+            path
+        };
+        tab.remote_path = path.clone();
+        tab.sftp.close();
+
+        let (sftp_tx, sftp_rx) = tokio::sync::mpsc::unbounded_channel::<SessionEvent>();
+        let sftp = Rc::new(spawn_sftp(runtime.handle(), tab.session.clone(), sftp_tx));
+        tab.sftp = sftp.clone();
+        tab.connected = true;
+        (tab.id.clone(), path, sftp, sftp_rx)
+    };
+
+    let (tab_id, path, sftp, sftp_rx) = reconnect;
+    spawn_transfer_sftp_event_pump(window.as_weak(), tab_id.clone(), sftp_rx);
+    sync_transfer_remote_tabs(window, remote_tabs);
+    if active == tab_id {
+        window.set_remote_path(path.clone().into());
+        window.set_remote_entries(empty_entries_model());
+        window.set_remote_loading(true);
+        window.set_remote_status(t("SFTP 重连中...", "SFTP reconnecting...").into());
+    }
+    sftp.list_dir(path);
+}
+
 pub(super) fn wire_transfer_window_callbacks(
     window: &TransferWindow,
     remote_tabs: Rc<std::cell::RefCell<Vec<TransferRemoteTab>>>,
+    runtime: Arc<Runtime>,
 ) {
     {
         let weak = window.as_weak();
@@ -369,6 +415,15 @@ pub(super) fn wire_transfer_window_callbacks(
         window.on_remote_tab_closed(move |tab_id: SharedString| {
             let Some(w) = weak.upgrade() else { return };
             close_transfer_tab(&w, &remote_tabs, tab_id.to_string());
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let remote_tabs = remote_tabs.clone();
+        let runtime = runtime.clone();
+        window.on_remote_tab_reconnect(move |tab_id: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            reconnect_transfer_tab(&w, &remote_tabs, runtime.clone(), tab_id.to_string());
         });
     }
     {

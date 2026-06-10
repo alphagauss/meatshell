@@ -118,6 +118,7 @@ export component TransferWindow inherits Window {
                             tab-ta := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.remote-tab-selected(tab.id); }
+                                double-clicked => { root.remote-tab-reconnect(tab.id); }
                             }
                             HorizontalLayout {
                                 padding-left: 8px;
