@@ -636,8 +636,9 @@ export component TerminalView inherits Rectangle {
 
         // --- Drag handle ----------------------------------------------------
         Rectangle {
-            visible: root.bottom-panel-visible;
             height: root.bottom-panel-visible ? 4px : 0px;
+            clip: true;
+            animate height { duration: 140ms; easing: ease-out; }
             background: divider-ta.has-hover || root.sftp-dragging
                 ? Theme.accent
                 : Theme.border-subtle;
@@ -668,8 +669,9 @@ export component TerminalView inherits Rectangle {
 
         // --- Bottom panel ---------------------------------------------------
         BottomPanel {
-            visible: root.bottom-panel-visible;
             height: root.bottom-panel-visible ? root.sftp-panel-height : 0px;
+            clip: true;
+            animate height { duration: 140ms; easing: ease-out; }
             active-tab: root.bottom-panel-tab;
             current-path: root.sftp-path;
             entries: root.sftp-entries;

@@ -219,8 +219,9 @@ export component AppWindow inherits Window {
 
         // Left sidebar
         Sidebar {
-            visible: root.sidebar-visible;
             width: root.sidebar-visible ? 220px : 0px;
+            clip: true;
+            animate width { duration: 140ms; easing: ease-out; }
             connection-state: root.connection-state;
             conn-state: root.conn-state;
             resource-title: root.resource-title;

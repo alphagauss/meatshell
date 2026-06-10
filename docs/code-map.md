@@ -576,6 +576,7 @@
 - settings popup 还承载终端字体和字号选择；主题暗/亮状态通过 `dark-mode` 绑定到 `Theme.dark`
 - 根组件末尾承载全局 tooltip 浮层，`TopActionBar` 只上报 tooltip 文案和窗口坐标，避免按钮内部 tooltip 被裁剪
 - 暴露 `sidebar-visible`、`bottom-panel-visible`、`bottom-panel-tab` 布局状态给 Rust 侧 `AppState`
+- 侧边栏显隐通过宽度动画完成，不再用 `visible=false` 销毁侧边栏布局
 - 暴露当前 active session 的 `tunnel-rules` 模型和隧道规则增删改/启用回调给 Rust
 
 关键符号：
@@ -630,7 +631,7 @@
 - 搜索高亮、拖拽选区、右键菜单、滚轮滚动
 - 当终端引擎报告 SGR mouse mode 已开启时，把左键按下/释放和滚轮转发给 Rust，避免普通文本选择退化
 - 底部 `BottomPanel` 承载
-- 根据 `bottom-panel-visible` / `bottom-panel-tab` 决定当前底部文件面板是否显示
+- 根据 `bottom-panel-visible` / `bottom-panel-tab` 决定当前底部文件面板是否显示；底部拖拽条和面板通过高度动画展开/收起
 - 把 `tunnel-rules` 和隧道规则回调继续传给底部 `TunnelPanel`
 
 关键符号：
@@ -659,6 +660,7 @@
 - 底部“文件 / 隧道”页签外壳
 - `Files` 页继续承载现有 `SftpPanel`
 - `Tunnels` 页承载 `TunnelPanel` 规则管理面板
+- 面板根节点启用裁剪，配合 `ui/terminal_view.slint` 的高度动画收起内容
 
 关键符号：
 - `BottomPanel`
@@ -716,6 +718,7 @@
 ### `ui/sidebar.slint`
 职责：
 - 左侧状态栏
+- 根节点启用裁剪，配合 `ui/app.slint` 的宽度动画收起内容
 - CPU / 内存 / Swap
 - 连接远程会话时显示进程表，内存和 CPU 表头可切换排序
 - 双网络图
