@@ -130,6 +130,7 @@
 职责：
 - 保存终端按键、鼠标上报、resize、剪贴板和选区交互的 UI glue
 - 按当前 active terminal engine 的 `application_cursor` / `mouse_reporting` / `bracketed_paste` 能力切换方向键、SGR mouse 和粘贴包装
+- 普通滚轮滚动 legacy 自有 scrollback；Alacritty 模式滚轮调用 `AlacrittyTerminalEngine::scroll_lines(...)`，但 alt-screen / mouse-reporting 时不改本地 scrollback
 - 只负责把 Slint 事件转成 PTY 字节、终端窗口尺寸、剪贴板操作和重新绘制调用，不触碰 SSH / SFTP / tunnel / render 引擎本体
 
 关键符号：
@@ -347,11 +348,15 @@
 - 接收 SSH 输出 bytes，交给 alacritty parser 更新终端状态
 - 把 alacritty grid/cell 转换为 `BuiltScreen<RenderSpan>`，不把 alacritty 内部类型泄漏到 `app/mod.rs` 或 Slint
 - 支持基础 resize，并从 alacritty `TermMode` 暴露 mouse reporting / application cursor / bracketed paste 状态给 UI
+- 使用 Alacritty grid `display_offset` 支持普通 shell 本地 scrollback，`view_offset` 镜像当前显示偏移，`scroll_lines(...)` / `scroll_to_bottom(...)` 负责滚动和键入回到底部
 - render adapter 当前把 cell 转成 plain/render 双文本，再通过小 helper 合并 span，避免宽字符占位 cell、行尾空白和背景色 span 在 `render()` 里反复手写
 
 关键符号：
 - `AlacrittyTerminalEngine`
 - `AlacrittyDimensions`
+- `view_offset`
+- `scroll_lines(...)`
+- `scroll_to_bottom(...)`
 - `cell_to_attrs(...)`
 - `convert_color(...)`
 - `should_skip_wide_placeholder(...)`

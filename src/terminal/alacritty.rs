@@ -1,10 +1,10 @@
 use std::cell::{Ref, RefCell};
 
 use alacritty_terminal::event::VoidListener;
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::color::Colors;
-use alacritty_terminal::term::{Config, Term, TermMode};
+use alacritty_terminal::term::{point_to_viewport, Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, Rgb};
 
 use super::engine::{TerminalEngine, TerminalEngineMode};
@@ -36,6 +36,7 @@ impl Dimensions for AlacrittyDimensions {
 pub struct AlacrittyTerminalEngine {
     term: Term<VoidListener>,
     parser: Processor,
+    pub view_offset: usize,
     displayed_text: RefCell<Vec<String>>,
 }
 
@@ -48,12 +49,27 @@ impl AlacrittyTerminalEngine {
         Self {
             term: Term::new(Config::default(), &dimensions, VoidListener),
             parser: Processor::new(),
+            view_offset: 0,
             displayed_text: RefCell::new(Vec::new()),
         }
     }
 
     pub fn displayed_text(&self) -> Ref<'_, Vec<String>> {
         self.displayed_text.borrow()
+    }
+
+    pub fn is_alt_screen(&self) -> bool {
+        self.term.mode().contains(TermMode::ALT_SCREEN)
+    }
+
+    pub fn scroll_lines(&mut self, delta: i32) {
+        self.term.scroll_display(Scroll::Delta(delta));
+        self.view_offset = self.term.grid().display_offset();
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.term.scroll_display(Scroll::Bottom);
+        self.view_offset = self.term.grid().display_offset();
     }
 }
 
@@ -64,6 +80,7 @@ impl TerminalEngine for AlacrittyTerminalEngine {
 
     fn ingest(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
+        self.view_offset = self.term.grid().display_offset();
     }
 
     fn render(&self) -> BuiltScreen<RenderSpan> {
@@ -71,6 +88,7 @@ impl TerminalEngine for AlacrittyTerminalEngine {
         let colors = renderable.colors;
         let cursor = renderable.cursor;
         let mode = renderable.mode;
+        let display_offset = renderable.display_offset;
         let rows = self.term.screen_lines();
         let cols = self.term.columns();
         let mut cells_by_row = (0..rows)
@@ -78,11 +96,10 @@ impl TerminalEngine for AlacrittyTerminalEngine {
             .collect::<Vec<Vec<CellAttrs>>>();
 
         for indexed in renderable.display_iter {
-            let row = indexed.point.line.0;
-            if row < 0 {
+            let Some(point) = point_to_viewport(display_offset, indexed.point) else {
                 continue;
-            }
-            let row = row as usize;
+            };
+            let row = point.line;
             if row >= rows {
                 continue;
             }
@@ -119,7 +136,8 @@ impl TerminalEngine for AlacrittyTerminalEngine {
 
         self.displayed_text.replace(displayed);
 
-        let (cursor_row, cursor_col) = if cursor.shape == CursorShape::Hidden {
+        let (cursor_row, cursor_col) = if cursor.shape == CursorShape::Hidden || display_offset > 0
+        {
             (-1, 0)
         } else {
             (cursor.point.line.0, cursor.point.column.0 as i32)
@@ -129,7 +147,7 @@ impl TerminalEngine for AlacrittyTerminalEngine {
             spans,
             cursor_row,
             cursor_col,
-            rows_used: if mode.contains(TermMode::ALT_SCREEN) {
+            rows_used: if mode.contains(TermMode::ALT_SCREEN) || display_offset > 0 {
                 rows as i32
             } else {
                 last_content + 1
@@ -144,6 +162,7 @@ impl TerminalEngine for AlacrittyTerminalEngine {
             columns: cols.max(1),
             screen_lines: rows.max(1),
         });
+        self.view_offset = self.term.grid().display_offset();
     }
 
     fn mouse_reporting(&self) -> bool {
@@ -462,5 +481,24 @@ mod tests {
         finish_span(&mut spans, pending.take());
 
         assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn scroll_lines_changes_rendered_view() {
+        let mut engine = AlacrittyTerminalEngine::new(3, 20);
+        TerminalEngine::ingest(&mut engine, b"line0\r\nline1\r\nline2\r\nline3\r\nline4");
+
+        TerminalEngine::render(&engine);
+        let live_text = engine.displayed_text().clone();
+        assert_eq!(engine.view_offset, 0);
+
+        engine.scroll_lines(2);
+        let scrolled = TerminalEngine::render(&engine);
+        let scrolled_text = engine.displayed_text().clone();
+
+        assert!(engine.view_offset > 0);
+        assert_eq!(scrolled.cursor_row, -1);
+        assert_eq!(scrolled.rows_used, 3);
+        assert_ne!(scrolled_text, live_text);
     }
 }

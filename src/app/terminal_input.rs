@@ -41,6 +41,9 @@ pub(super) fn wire_key_input(
                         // Typing snaps the view back to the live bottom so the
                         // user always sees what they're entering.
                         b.view_offset = 0;
+                        if let Some(alacritty) = b.alacritty.as_mut() {
+                            alacritty.scroll_to_bottom();
+                        }
                         TerminalEngine::application_cursor(b)
                     }
                     None => false,
@@ -476,11 +479,17 @@ pub(super) fn wire_key_input(
             {
                 let mut map = bufs_scroll.lock().unwrap();
                 let Some(buf) = map.get_mut(&tid) else { return };
-                // Scroll within our own session scrollback (history lines above
-                // the live screen).  Offset 0 = live bottom.
-                let max_off = buf.history.len() as i64;
-                let cur = buf.view_offset as i64;
-                buf.view_offset = (cur + delta as i64).clamp(0, max_off) as usize;
+                if let Some(alacritty) = buf.alacritty.as_mut() {
+                    if !alacritty.is_alt_screen() && !TerminalEngine::mouse_reporting(alacritty) {
+                        alacritty.scroll_lines(delta);
+                    }
+                } else {
+                    // Scroll within our own session scrollback (history lines above
+                    // the live screen).  Offset 0 = live bottom.
+                    let max_off = buf.history.len() as i64;
+                    let cur = buf.view_offset as i64;
+                    buf.view_offset = (cur + delta as i64).clamp(0, max_off) as usize;
+                }
             }
             if let Some(win) = weak.upgrade() {
                 rebuild_tab_display(&win, &bufs_scroll, &tid);
