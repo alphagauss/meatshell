@@ -8,7 +8,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::i18n::t;
 use crate::tunnel::{TunnelEvent, TunnelView};
 
-use super::models::set_terminal_row;
+use super::models::{active_session_or_hint, set_terminal_row};
 use super::types::{ConnectionStore, TunnelStore};
 use super::{AppWindow, TunnelRuleInfo};
 
@@ -46,11 +46,7 @@ pub(super) fn wire_tunnel_callbacks(
         let tunnels = tunnels.clone();
         window.on_tunnel_add_rule(move || {
             let Some(w) = weak.upgrade() else { return };
-            let active = w.get_active_tab_id().to_string();
-            let Some(session) = connections.lock().unwrap().session(&active) else {
-                set_terminal_row(&w, &active, |row| {
-                    row.status = t("没有可用的隧道会话", "No session available for tunnels").into();
-                });
+            let Some((active, session)) = active_session_or_hint(&w, &connections) else {
                 return;
             };
             let result = tunnels.lock().unwrap().add_rule(&session.id);
@@ -72,7 +68,9 @@ pub(super) fn wire_tunnel_callbacks(
         window.on_tunnel_update_rule(
             move |id, name, local_host, local_port, remote_host, remote_port| {
                 let Some(w) = weak.upgrade() else { return };
-                let active = w.get_active_tab_id().to_string();
+                let Some((active, session)) = active_session_or_hint(&w, &connections) else {
+                    return;
+                };
                 let result = tunnels.lock().unwrap().update_rule(
                     &id.to_string(),
                     name.to_string(),
@@ -84,12 +82,10 @@ pub(super) fn wire_tunnel_callbacks(
                 match result {
                     Ok(Some(rule)) => {
                         if rule.enabled {
-                            if let Some(session) = connections.lock().unwrap().session(&active) {
-                                tunnels
-                                    .lock()
-                                    .unwrap()
-                                    .start_rule(runtime.handle(), session, rule);
-                            }
+                            tunnels
+                                .lock()
+                                .unwrap()
+                                .start_rule(runtime.handle(), session, rule);
                         }
                     }
                     Ok(None) => {}
@@ -113,7 +109,9 @@ pub(super) fn wire_tunnel_callbacks(
         let runtime = runtime.clone();
         window.on_tunnel_toggle_rule(move |id, enabled| {
             let Some(w) = weak.upgrade() else { return };
-            let active = w.get_active_tab_id().to_string();
+            let Some((active, session)) = active_session_or_hint(&w, &connections) else {
+                return;
+            };
             let result = tunnels
                 .lock()
                 .unwrap()
@@ -121,12 +119,10 @@ pub(super) fn wire_tunnel_callbacks(
             match result {
                 Ok(Some(rule)) => {
                     if enabled {
-                        if let Some(session) = connections.lock().unwrap().session(&active) {
-                            tunnels
-                                .lock()
-                                .unwrap()
-                                .start_rule(runtime.handle(), session, rule);
-                        }
+                        tunnels
+                            .lock()
+                            .unwrap()
+                            .start_rule(runtime.handle(), session, rule);
                     }
                 }
                 Ok(None) => {}
@@ -148,7 +144,9 @@ pub(super) fn wire_tunnel_callbacks(
         let tunnels = tunnels.clone();
         window.on_tunnel_delete_rule(move |id| {
             let Some(w) = weak.upgrade() else { return };
-            let active = w.get_active_tab_id().to_string();
+            let Some((active, _session)) = active_session_or_hint(&w, &connections) else {
+                return;
+            };
             if let Err(err) = tunnels.lock().unwrap().delete_rule(&id.to_string()) {
                 set_terminal_row(&w, &active, |row| {
                     row.status =

@@ -22,7 +22,7 @@
 - [x] step-012：修复 debug 启动 ICU4X ja 分词模型重复报错
 - [x] step-013：修复主界面菜单栏位置，菜单栏在标签页上方
 - [x] step-014：修复标签页/菜单按钮 tooltip 被遮挡
-- [ ] step-015：增加统一 active session guard，禁止新标签页执行会话操作
+- [x] step-015：增加统一 active session guard，禁止新标签页执行会话操作
 - [ ] step-016：修复 Alacritty 模式普通页面鼠标滚动不生效
 - [ ] step-017：文件传输窗口改为单例窗口
 - [ ] step-018：文件传输窗口右侧远程区域支持多 tab

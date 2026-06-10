@@ -1,6 +1,7 @@
 use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, SharedString, VecModel};
 
+use super::models::{sftp_handle_or_hint, show_connect_session_hint};
 use super::platform::cursor_pos;
 use super::types::SftpHandles;
 use super::{AppWindow, SftpManualNav, TerminalState};
@@ -17,21 +18,29 @@ pub(super) fn wire_sftp_callbacks(
         let weak = window.as_weak();
         window.on_sftp_navigate(move |tab_id: SharedString, path: SharedString| {
             let tab_id = tab_id.to_string();
+            let Some(w) = weak.upgrade() else { return };
+            if !sftp_handle_or_hint(&w, &sftp_handles, &tab_id) {
+                return;
+            }
             let resolved = if path.as_str() == ".." {
-                let current = weak.upgrade().and_then(|w| {
+                let current = {
                     let terminals_rc = w.get_terminals();
-                    let terminals = terminals_rc
+                    let mut current = None;
+                    if let Some(terminals) = terminals_rc
                         .as_any()
-                        .downcast_ref::<VecModel<TerminalState>>()?;
-                    for i in 0..terminals.row_count() {
-                        if let Some(row) = terminals.row_data(i) {
-                            if row.id.as_str() == tab_id {
-                                return Some(row.sftp_path.to_string());
+                        .downcast_ref::<VecModel<TerminalState>>()
+                    {
+                        for i in 0..terminals.row_count() {
+                            if let Some(row) = terminals.row_data(i) {
+                                if row.id.as_str() == tab_id {
+                                    current = Some(row.sftp_path.to_string());
+                                    break;
+                                }
                             }
                         }
                     }
-                    None
-                });
+                    current
+                };
                 parent_path(&current.unwrap_or_else(|| "/".to_string()))
             } else {
                 path.to_string()
@@ -54,10 +63,11 @@ pub(super) fn wire_sftp_callbacks(
         window.on_sftp_download(move |tab_id: SharedString, remote_path: SharedString| {
             let tab_id = tab_id.to_string();
             let remote_path = remote_path.to_string();
-            let preset = weak
-                .upgrade()
-                .map(|w| w.get_download_dir().to_string())
-                .unwrap_or_default();
+            let Some(w) = weak.upgrade() else { return };
+            if !sftp_handle_or_hint(&w, &sftp_handles, &tab_id) {
+                return;
+            }
+            let preset = w.get_download_dir().to_string();
             if !preset.is_empty() {
                 if let Ok(handles) = sftp_handles.lock() {
                     if let Some(h) = handles.get(&tab_id) {
@@ -83,9 +93,14 @@ pub(super) fn wire_sftp_callbacks(
     // Upload a local file into the current remote directory.
     {
         let sftp_handles = sftp_handles.clone();
+        let weak = window.as_weak();
         window.on_sftp_upload_clicked(move |tab_id: SharedString, remote_dir: SharedString| {
             let tab_id = tab_id.to_string();
             let remote_dir = remote_dir.to_string();
+            let Some(w) = weak.upgrade() else { return };
+            if !sftp_handle_or_hint(&w, &sftp_handles, &tab_id) {
+                return;
+            }
             let sftp_handles = sftp_handles.clone();
             std::thread::spawn(move || {
                 if let Some(file) = rfd::FileDialog::new().pick_file() {
@@ -103,9 +118,14 @@ pub(super) fn wire_sftp_callbacks(
     // Refresh the current directory listing.
     {
         let sftp_handles = sftp_handles.clone();
+        let weak = window.as_weak();
         window.on_sftp_refresh(move |tab_id: SharedString, path: SharedString| {
             let tab_id = tab_id.to_string();
             let path = path.to_string();
+            let Some(w) = weak.upgrade() else { return };
+            if !sftp_handle_or_hint(&w, &sftp_handles, &tab_id) {
+                return;
+            }
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
                     h.list_dir(path);
@@ -118,9 +138,14 @@ pub(super) fn wire_sftp_callbacks(
     {
         let sftp_handles = sftp_handles.clone();
         let sftp_manual_nav = sftp_manual_nav.clone();
+        let weak = window.as_weak();
         window.on_sftp_tree_expand(move |tab_id: SharedString, path: SharedString| {
             let tab_id = tab_id.to_string();
             let path = path.to_string();
+            let Some(w) = weak.upgrade() else { return };
+            if !sftp_handle_or_hint(&w, &sftp_handles, &tab_id) {
+                return;
+            }
             // Manual tree navigation stops cd auto-follow.
             sftp_manual_nav.lock().unwrap().insert(tab_id.clone(), true);
             if let Ok(handles) = sftp_handles.lock() {
@@ -135,7 +160,12 @@ pub(super) fn wire_sftp_callbacks(
     // Context menu → 删除 a remote file.
     {
         let sftp_handles = sftp_handles.clone();
+        let weak = window.as_weak();
         window.on_sftp_delete(move |tab_id: SharedString, path: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            if !sftp_handle_or_hint(&w, &sftp_handles, tab_id.as_str()) {
+                return;
+            }
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(tab_id.as_str()) {
                     h.delete(path.to_string());
@@ -147,7 +177,12 @@ pub(super) fn wire_sftp_callbacks(
     // Context menu → 查看 (open read-only) / 编辑 (open + auto-reupload).
     {
         let sftp_handles = sftp_handles.clone();
+        let weak = window.as_weak();
         window.on_sftp_view(move |tab_id: SharedString, path: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            if !sftp_handle_or_hint(&w, &sftp_handles, tab_id.as_str()) {
+                return;
+            }
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(tab_id.as_str()) {
                     h.open_temp(path.to_string(), false);
@@ -157,7 +192,12 @@ pub(super) fn wire_sftp_callbacks(
     }
     {
         let sftp_handles = sftp_handles.clone();
+        let weak = window.as_weak();
         window.on_sftp_edit(move |tab_id: SharedString, path: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            if !sftp_handle_or_hint(&w, &sftp_handles, tab_id.as_str()) {
+                return;
+            }
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(tab_id.as_str()) {
                     h.open_temp(path.to_string(), true);
@@ -189,6 +229,7 @@ pub(super) fn active_sftp_path(win: &AppWindow, tab_id: &str) -> String {
 pub(super) fn handle_file_drop(win: &AppWindow, sftp_handles: &SftpHandles, path: String) {
     let active = win.get_active_tab_id().to_string();
     if active == "welcome" {
+        show_connect_session_hint(win, &active);
         return;
     }
     let w = win.window();
@@ -219,6 +260,10 @@ pub(super) fn handle_file_drop(win: &AppWindow, sftp_handles: &SftpHandles, path
 
     let dir = active_sftp_path(win, &active);
     if dir.is_empty() {
+        show_connect_session_hint(win, &active);
+        return;
+    }
+    if !sftp_handle_or_hint(win, sftp_handles, &active) {
         return;
     }
     if let Ok(handles) = sftp_handles.lock() {

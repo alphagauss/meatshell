@@ -105,10 +105,14 @@
 职责：
 - 保存终端显示用的 Slint model 适配器
 - 负责把 Rust 侧的渲染结果和终端状态写回 `TerminalState`，避免这类轻量转换继续留在 `src/app/mod.rs`
+- 提供统一 active session guard 和 “请先连接一个会话” 提示，供 tab 工具栏、文件传输、隧道和 SFTP 操作入口复用
 
 关键符号：
 - `term_spans_model(...)`
 - `set_terminal_row(...)`
+- `show_connect_session_hint(...)`
+- `active_session_or_hint(...)`
+- `sftp_handle_or_hint(...)`
 
 ### `src/app/terminal_render.rs`
 职责：
@@ -182,6 +186,7 @@
 职责：
 - 保存 tab 列表和当前连接工具栏的 UI glue
 - 负责 tab 关闭 / 新建，以及断开 / 重连当前 tab 的回调接线
+- 断开 / 重连入口通过 `active_session_or_hint(...)` 阻止欢迎页或无 session tab 误执行会话操作
 
 关键符号：
 - `wire_connection_toolbar_callbacks(...)`
@@ -191,6 +196,7 @@
 职责：
 - 保存 SFTP 面板的 UI glue，以及拖拽上传的命中检测
 - 负责把 SFTP 面板回调和当前 tab 的远程路径定位接到 Slint
+- SFTP 导航、上传、下载、删除、查看、编辑入口通过 `sftp_handle_or_hint(...)` 统一拦截无 session 状态
 
 关键符号：
 - `wire_sftp_callbacks(...)`
@@ -202,6 +208,7 @@
 职责：
 - 保存独立文件传输窗口的 UI glue
 - 负责把 `src/file_transfer.rs` 的本地目录 helper 和 `src/sftp.rs` 的 worker 接到 `ui/transfer_window.slint`
+- 顶部工具栏的打开文件传输入口通过 `active_session_or_hint(...)` 阻止欢迎页误开窗口
 
 关键符号：
 - `open_transfer_window(...)`
@@ -216,6 +223,7 @@
 职责：
 - 保存隧道面板的 UI glue
 - 负责把 `src/tunnel.rs` 的规则管理和事件泵接到 `ui/tunnel_panel.slint`
+- 隧道新增、保存、启停、删除入口通过 `active_session_or_hint(...)` 阻止欢迎页或无 session tab 修改规则
 
 关键符号：
 - `spawn_tunnel_event_pump(...)`

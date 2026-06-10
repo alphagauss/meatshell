@@ -9,7 +9,7 @@ use crate::sftp::spawn_sftp;
 use crate::ssh::SessionEvent;
 
 use super::events::{spawn_sftp_event_pump, spawn_shell_event_pump};
-use super::models::set_terminal_row;
+use super::models::{active_session_or_hint, set_terminal_row};
 use super::sidebar::refresh_sidebar;
 use super::tunnels::refresh_tunnel_panel;
 use super::types::{
@@ -43,14 +43,11 @@ pub(super) fn wire_connection_toolbar_callbacks(
         let local_net_hist = local_net_hist.clone();
         window.on_disconnect_active_tab(move || {
             let Some(w) = weak.upgrade() else { return };
-            let active = w.get_active_tab_id().to_string();
-            if active == "welcome" {
+            let Some((active, session)) = active_session_or_hint(&w, &connections) else {
                 return;
-            }
+            };
 
-            if let Some(session) = connections.lock().unwrap().session(&active) {
-                tunnels.lock().unwrap().stop_for_session(&session.id);
-            }
+            tunnels.lock().unwrap().stop_for_session(&session.id);
             connections.lock().unwrap().disconnect(&active);
             if let Some(sftp) = sftp_handles.lock().unwrap().remove(&active) {
                 sftp.close();
@@ -90,18 +87,7 @@ pub(super) fn wire_connection_toolbar_callbacks(
         let tunnels = tunnels.clone();
         window.on_reconnect_active_tab(move || {
             let Some(w) = weak.upgrade() else { return };
-            let active = w.get_active_tab_id().to_string();
-            if active == "welcome" {
-                w.set_ssh_import_hint(
-                    t("重连将在阶段 3 实现", "Reconnect is planned for phase 3").into(),
-                );
-                return;
-            }
-
-            let Some(session) = connections.lock().unwrap().session(&active) else {
-                set_terminal_row(&w, &active, |row| {
-                    row.status = t("没有可重连的会话", "No session available to reconnect").into();
-                });
+            let Some((active, session)) = active_session_or_hint(&w, &connections) else {
                 return;
             };
             tunnels.lock().unwrap().stop_for_session(&session.id);

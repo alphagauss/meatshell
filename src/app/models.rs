@@ -2,8 +2,11 @@ use std::rc::Rc;
 
 use slint::{Model, ModelRc, VecModel};
 
+use crate::config::Session;
+use crate::i18n::t;
 use crate::terminal::types::RenderSpan;
 
+use super::types::{ConnectionStore, SftpHandles};
 use super::{AppWindow, TermSpan, TerminalState};
 
 /// Convert a Rust render span list into the Slint model used by the terminal UI.
@@ -42,5 +45,48 @@ pub(super) fn set_terminal_row(
                 break;
             }
         }
+    }
+}
+
+pub(super) fn show_connect_session_hint(win: &AppWindow, tab_id: &str) {
+    let message = t("请先连接一个会话", "Connect a session first");
+    if tab_id == "welcome" || win.get_active_tab_id().as_str() == "welcome" {
+        win.set_ssh_import_hint(message.into());
+    } else {
+        set_terminal_row(win, tab_id, |row| {
+            row.status = message.into();
+        });
+    }
+}
+
+pub(super) fn active_session_or_hint(
+    win: &AppWindow,
+    connections: &ConnectionStore,
+) -> Option<(String, Session)> {
+    let active = win.get_active_tab_id().to_string();
+    let session = if active == "welcome" {
+        None
+    } else {
+        connections.lock().unwrap().session(&active)
+    };
+    match session {
+        Some(session) => Some((active, session)),
+        None => {
+            show_connect_session_hint(win, &active);
+            None
+        }
+    }
+}
+
+pub(super) fn sftp_handle_or_hint(
+    win: &AppWindow,
+    sftp_handles: &SftpHandles,
+    tab_id: &str,
+) -> bool {
+    if sftp_handles.lock().unwrap().contains_key(tab_id) {
+        true
+    } else {
+        show_connect_session_hint(win, tab_id);
+        false
     }
 }

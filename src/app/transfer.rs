@@ -12,7 +12,7 @@ use crate::i18n::t;
 use crate::sftp::{spawn_sftp, SftpHandle};
 use crate::ssh::{format_mtime, format_size, RemoteEntry, SessionEvent};
 
-use super::models::set_terminal_row;
+use super::models::{active_session_or_hint, set_terminal_row};
 use super::sftp_panel::parent_path;
 use super::types::{TransferWindowState, TransferWindows};
 use super::{SftpEntry, TransferWindow};
@@ -69,19 +69,7 @@ pub(super) fn wire_transfer_toolbar_callbacks(
     let weak = window.as_weak();
     window.on_open_transfer_window(move || {
         let Some(w) = weak.upgrade() else { return };
-        let active = w.get_active_tab_id().to_string();
-        if active == "welcome" {
-            w.set_ssh_import_hint(t("请先连接一个会话", "Connect a session first").into());
-            return;
-        }
-        let Some(session) = connections.lock().unwrap().session(&active) else {
-            set_terminal_row(&w, &active, |row| {
-                row.status = t(
-                    "没有可用的文件传输会话",
-                    "No session available for transfer",
-                )
-                .into();
-            });
+        let Some((active, session)) = active_session_or_hint(&w, &connections) else {
             return;
         };
         let local_dir = store.borrow().download_dir().to_string();
