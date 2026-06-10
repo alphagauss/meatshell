@@ -21,21 +21,48 @@ use super::{
 };
 
 pub(super) fn sync_sessions_to_model(store: &ConfigStore, model: &VecModel<SessionInfo>) {
-    let rows: Vec<SessionInfo> = store
-        .sessions()
-        .iter()
-        .map(|s| SessionInfo {
-            id: s.id.clone().into(),
-            name: s.name.clone().into(),
-            host: s.host.clone().into(),
-            port: s.port as i32,
-            user: s.user.clone().into(),
-            auth: s.auth.as_str().into(),
-            last_used: s
-                .last_used
-                .clone()
-                .unwrap_or_else(|| "never".to_string())
-                .into(),
+    let effective_group = |group: &str| -> String {
+        if group.is_empty() {
+            "default".to_string()
+        } else {
+            group.to_string()
+        }
+    };
+    let mut sessions: Vec<&Session> = store.sessions().iter().collect();
+    sessions.sort_by(|a, b| {
+        effective_group(&a.group)
+            .to_lowercase()
+            .cmp(&effective_group(&b.group).to_lowercase())
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    let mut last_group: Option<String> = None;
+    let rows: Vec<SessionInfo> = sessions
+        .into_iter()
+        .map(|s| {
+            let group = effective_group(&s.group);
+            let header = if last_group.as_deref() == Some(group.as_str()) {
+                String::new()
+            } else {
+                last_group = Some(group.clone());
+                group.clone()
+            };
+            SessionInfo {
+                id: s.id.clone().into(),
+                name: s.name.clone().into(),
+                host: s.host.clone().into(),
+                port: s.port as i32,
+                user: s.user.clone().into(),
+                auth: s.auth.as_str().into(),
+                last_used: s
+                    .last_used
+                    .clone()
+                    .unwrap_or_else(|| "never".to_string())
+                    .into(),
+                group: group.into(),
+                group_header: header.into(),
+                collapsed: false,
+            }
         })
         .collect();
     model.set_vec(rows);
@@ -72,6 +99,7 @@ pub(super) fn wire_session_callbacks(
             w.set_dialog_password("".into());
             w.set_dialog_key_path("".into());
             w.set_dialog_proxy("".into());
+            w.set_dialog_group("".into());
             w.set_dialog_editing(false);
             w.set_dialog_open(true);
         }
@@ -143,6 +171,57 @@ pub(super) fn wire_session_callbacks(
         });
     }
 
+    // Export/import saved sessions as JSON.
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        window.on_export_sessions(move || {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_file_name("meatshell-connections.json")
+                .add_filter("JSON", &["json"])
+                .save_file()
+            {
+                let result = store.borrow().export_to(&path);
+                if let Some(w) = weak.upgrade() {
+                    let hint = match result {
+                        Ok(count) => format!("{} {}", t("已导出连接", "exported"), count),
+                        Err(err) => format!("{}: {err}", t("导出失败", "export failed")),
+                    };
+                    w.set_ssh_import_hint(hint.into());
+                }
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let sessions_model = sessions_model.clone();
+        window.on_import_sessions(move || {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("JSON", &["json"])
+                .pick_file()
+            {
+                let result = store.borrow_mut().import_from(&path);
+                if let Some(w) = weak.upgrade() {
+                    let hint = match result {
+                        Ok((added, skipped)) => {
+                            sync_sessions_to_model(&store.borrow(), &sessions_model);
+                            format!(
+                                "{} {} / {} {}",
+                                t("已导入", "imported"),
+                                added,
+                                t("跳过重复", "skipped"),
+                                skipped
+                            )
+                        }
+                        Err(err) => format!("{}: {err}", t("导入失败", "import failed")),
+                    };
+                    w.set_ssh_import_hint(hint.into());
+                }
+            }
+        });
+    }
+
     // Edit -> open dialog prefilled.
     {
         let weak = window.as_weak();
@@ -163,6 +242,7 @@ pub(super) fn wire_session_callbacks(
                 w.set_dialog_password("".into());
                 w.set_dialog_key_path(session.private_key_path.clone().into());
                 w.set_dialog_proxy(session.proxy.clone().into());
+                w.set_dialog_group(session.group.clone().into());
                 w.set_dialog_editing(true);
                 w.set_dialog_open(true);
             }
@@ -189,6 +269,65 @@ pub(super) fn wire_session_callbacks(
         });
     }
 
+    // Move a session to another group.
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let sessions_model = sessions_model.clone();
+        window.on_move_session(move |id: SharedString, group: SharedString| {
+            {
+                let mut s = store.borrow_mut();
+                if let Some(existing) = s.get(&id.to_string()).cloned() {
+                    let mut moved = existing;
+                    moved.group = if group.as_str() == "default" {
+                        String::new()
+                    } else {
+                        group.to_string()
+                    };
+                    s.upsert(moved);
+                    if let Err(err) = s.save() {
+                        tracing::warn!("failed to save config: {err:#}");
+                    }
+                }
+            }
+            sync_sessions_to_model(&store.borrow(), &sessions_model);
+            if let Some(w) = weak.upgrade() {
+                let _ = w.get_sessions();
+            }
+        });
+    }
+
+    // Collapse/expand a group in the welcome list.
+    {
+        let weak = window.as_weak();
+        let sessions_model = sessions_model.clone();
+        window.on_toggle_group(move |group: SharedString| {
+            use slint::Model as _;
+            let target = group.to_string();
+            let rows = sessions_model.row_count();
+            let mut next = false;
+            for i in 0..rows {
+                if let Some(row) = sessions_model.row_data(i) {
+                    if row.group.as_str() == target {
+                        next = !row.collapsed;
+                        break;
+                    }
+                }
+            }
+            for i in 0..rows {
+                if let Some(mut row) = sessions_model.row_data(i) {
+                    if row.group.as_str() == target {
+                        row.collapsed = next;
+                        sessions_model.set_row_data(i, row);
+                    }
+                }
+            }
+            if let Some(w) = weak.upgrade() {
+                let _ = w.get_sessions();
+            }
+        });
+    }
+
     // Dialog submit -> persist + (optionally) connect.
     {
         let weak = window.as_weak();
@@ -205,11 +344,6 @@ pub(super) fn wire_session_callbacks(
             } else {
                 Secret::new(draft.password.to_string())
             };
-            let group = store
-                .borrow()
-                .get(&id)
-                .map(|s| s.group.clone())
-                .unwrap_or_default();
             let new_session = Session {
                 id,
                 name: if draft.name.is_empty() {
@@ -228,7 +362,7 @@ pub(super) fn wire_session_callbacks(
                 password,
                 private_key_path: draft.private_key_path.to_string().replace('\\', "/"),
                 proxy: draft.proxy.to_string(),
-                group,
+                group: draft.group.to_string(),
                 last_used: None,
             };
             {

@@ -139,14 +139,19 @@ export component AppWindow inherits Window {
     in-out property <string> dialog-password;
     in-out property <string> dialog-key-path;
     in-out property <string> dialog-proxy;
+    in-out property <string> dialog-group;
 
     // --- Callbacks up to Rust ---------------------------------------------
     callback new-session-clicked();
     callback import-ssh-config();             // import hosts from ~/.ssh/config
+    callback export-sessions();
+    callback import-sessions();
     in-out property <string> ssh-import-hint;  // result text shown after import
     callback connect-session(string /* session-id */);
     callback edit-session(string /* session-id */);
     callback remove-session(string /* session-id */);
+    callback move-session(string /* session-id */, string /* group */);
+    callback toggle-group(string /* group */);
     callback session-dialog-submit(SessionDraft);
     callback session-dialog-cancel();
     callback session-dialog-pick-key();
@@ -276,6 +281,8 @@ export component AppWindow inherits Window {
                     import-ssh-config => { root.import-ssh-config(); }
                     connect-session(id) => { root.connect-session(id); }
                     edit-session(id) => { root.edit-session(id); }
+                    move-session(id, group) => { root.move-session(id, group); }
+                    toggle-group(group) => { root.toggle-group(group); }
                     remove-session(id) => { root.remove-session(id); }
                 }
 
@@ -601,7 +608,7 @@ export component AppWindow inherits Window {
         x: parent.width - 260px;
         y: 40px;
         width: 252px;
-        height: 258px;
+        height: 316px;
         visible: root.settings-open;
         background: Theme.bg-panel;
         border-radius: Theme.radius-md;
@@ -615,6 +622,48 @@ export component AppWindow inherits Window {
         VerticalLayout {
             padding: 4px;
             spacing: 1px;
+            Rectangle {
+                height: 28px;
+                border-radius: Theme.radius-sm;
+                background: export-ta.has-hover ? Theme.bg-hover : transparent;
+                export-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.settings-open = false;
+                        root.export-sessions();
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: 8px; spacing: 8px;
+                    Text { text: "\u{E5D8}"; font-family: "Material Icons";
+                           color: Theme.text-secondary; font-size: Theme.fs-sm;
+                           vertical-alignment: center; }
+                    Text { text: root.lang-en ? "Export connections" : "导出连接";
+                           color: Theme.text-primary; font-size: Theme.fs-md;
+                           vertical-alignment: center; horizontal-stretch: 1; }
+                }
+            }
+            Rectangle {
+                height: 28px;
+                border-radius: Theme.radius-sm;
+                background: impconn-ta.has-hover ? Theme.bg-hover : transparent;
+                impconn-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.settings-open = false;
+                        root.import-sessions();
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: 8px; spacing: 8px;
+                    Text { text: "\u{E5DB}"; font-family: "Material Icons";
+                           color: Theme.text-secondary; font-size: Theme.fs-sm;
+                           vertical-alignment: center; }
+                    Text { text: root.lang-en ? "Import connections" : "导入连接";
+                           color: Theme.text-primary; font-size: Theme.fs-md;
+                           vertical-alignment: center; horizontal-stretch: 1; }
+                }
+            }
             // Import hosts from ~/.ssh/config.
             Rectangle {
                 height: 28px;
@@ -855,6 +904,7 @@ export component AppWindow inherits Window {
         draft-password <=> root.dialog-password;
         draft-key-path <=> root.dialog-key-path;
         draft-proxy <=> root.dialog-proxy;
+        draft-group <=> root.dialog-group;
         submit(draft) => { root.session-dialog-submit(draft); }
         cancel => { root.session-dialog-cancel(); }
         pick-key-file => { root.session-dialog-pick-key(); }

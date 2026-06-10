@@ -7,7 +7,7 @@
 //! integration is tracked for a later iteration.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
@@ -157,6 +157,12 @@ pub struct ConfigFile {
     pub terminal_engine: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ExportFile {
+    meatshell_export: u32,
+    sessions: Vec<Session>,
+}
+
 pub struct ConfigStore {
     path: PathBuf,
     cache: ConfigFile,
@@ -304,6 +310,48 @@ impl ConfigStore {
             .with_context(|| format!("failed to finalise {}", self.path.display()))?;
         Ok(())
     }
+
+    pub fn export_to(&self, path: &Path) -> Result<usize> {
+        let mut out = ExportFile {
+            meatshell_export: 1,
+            sessions: self.cache.sessions.clone(),
+        };
+        for session in &mut out.sessions {
+            session.last_used = None;
+        }
+        let raw = serde_json::to_string_pretty(&out)?;
+        fs::write(path, raw).with_context(|| format!("failed to write {}", path.display()))?;
+        Ok(out.sessions.len())
+    }
+
+    pub fn import_from(&mut self, path: &Path) -> Result<(usize, usize)> {
+        let raw = fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let file: ExportFile =
+            serde_json::from_str(&raw).context("not a valid meatshell export file")?;
+
+        let mut added = 0usize;
+        let mut skipped = 0usize;
+        for mut session in file.sessions {
+            let duplicate = self.cache.sessions.iter().any(|existing| {
+                existing.host == session.host
+                    && existing.user == session.user
+                    && existing.port == session.port
+            });
+            if duplicate {
+                skipped += 1;
+                continue;
+            }
+            session.id = Uuid::new_v4().to_string();
+            session.last_used = None;
+            self.cache.sessions.push(session);
+            added += 1;
+        }
+        if added > 0 {
+            self.save()?;
+        }
+        Ok((added, skipped))
+    }
 }
 
 #[cfg(test)]
@@ -348,5 +396,37 @@ mod tests {
         assert_eq!(cfg.font_family, "");
         assert_eq!(cfg.font_size, 0);
         assert_eq!(cfg.sessions[0].group, "");
+    }
+
+    #[test]
+    fn export_import_roundtrip_skips_duplicates() {
+        let export_path = std::env::temp_dir().join(format!("ms-exp-{}.json", Uuid::new_v4()));
+        let mut source = ConfigStore {
+            path: PathBuf::new(),
+            cache: ConfigFile::default(),
+        };
+        source.cache.sessions.push(Session {
+            name: "prod".into(),
+            host: "example.com".into(),
+            user: "root".into(),
+            group: "Servers".into(),
+            password: Secret::new("secret"),
+            ..Session::new_empty()
+        });
+
+        assert_eq!(source.export_to(&export_path).unwrap(), 1);
+
+        let target_path = std::env::temp_dir().join(format!("ms-target-{}.json", Uuid::new_v4()));
+        let mut target = ConfigStore {
+            path: target_path,
+            cache: ConfigFile::default(),
+        };
+        assert_eq!(target.import_from(&export_path).unwrap(), (1, 0));
+        assert_eq!(target.cache.sessions[0].host, "example.com");
+        assert_eq!(target.cache.sessions[0].group, "Servers");
+        assert_eq!(target.import_from(&export_path).unwrap(), (0, 1));
+
+        let _ = std::fs::remove_file(&export_path);
+        let _ = std::fs::remove_file(&target.path);
     }
 }

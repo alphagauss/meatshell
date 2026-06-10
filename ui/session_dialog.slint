@@ -11,6 +11,7 @@ export struct SessionDraft {
     password: string,
     private-key-path: string,
     proxy: string,     // "" | "socks5://host:port" | "http://host:port"
+    group: string,     // folder/group name ("" = ungrouped)
 }
 
 // Modal dialog for creating / editing an SSH session.
@@ -28,6 +29,7 @@ export component SessionDialog inherits Rectangle {
     in-out property <string> draft-password;
     in-out property <string> draft-key-path;
     in-out property <string> draft-proxy;
+    in-out property <string> draft-group;
 
     callback submit(SessionDraft);
     callback cancel();
@@ -44,7 +46,7 @@ export component SessionDialog inherits Rectangle {
 
     Rectangle {
         width: 420px;
-        height: 520px;
+        height: 568px;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         background: Theme.bg-panel;
@@ -74,6 +76,12 @@ export component SessionDialog inherits Rectangle {
                 label: @tr("Name");
                 placeholder: @tr("e.g. production web-01");
                 value <=> root.draft-name;
+            }
+
+            LabeledInput {
+                label: @tr("Group (optional)");
+                placeholder: @tr("e.g. Production / Database");
+                value <=> root.draft-group;
             }
 
             HorizontalLayout {
@@ -254,6 +262,7 @@ export component SessionDialog inherits Rectangle {
                             password: root.draft-password,
                             private-key-path: root.draft-key-path,
                             proxy: root.draft-proxy,
+                            group: root.draft-group,
                         });
                     }
                 }

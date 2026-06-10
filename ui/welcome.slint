@@ -9,6 +9,9 @@ export struct SessionInfo {
     user: string,
     auth: string,      // "password" | "key"
     last-used: string, // ISO timestamp or "never"
+    group: string,
+    group-header: string,
+    collapsed: bool,
 }
 
 // --- SessionRow ------------------------------------------------------------
@@ -16,7 +19,9 @@ component SessionRow inherits Rectangle {
     in property <SessionInfo> session;
     callback connect();
     callback edit();
+    callback move-to-group(string);
     callback remove();
+    in property <[SessionInfo]> all-sessions;
 
     height: 36px;
     border-radius: Theme.radius-sm;
@@ -43,8 +48,8 @@ component SessionRow inherits Rectangle {
     ctx-menu := PopupWindow {
         x: ctx-x;
         y: ctx-y;
-        width: 120px;
-        height: 72px;
+        width: 140px;
+        height: menu-vl.preferred-height;
 
         Rectangle {
             background: Theme.bg-panel;
@@ -54,7 +59,7 @@ component SessionRow inherits Rectangle {
             drop-shadow-blur: 10px;
             drop-shadow-color: #00000050;
 
-            VerticalLayout {
+            menu-vl := VerticalLayout {
                 padding: 4px;
                 spacing: 2px;
 
@@ -73,6 +78,26 @@ component SessionRow inherits Rectangle {
                         alignment: center;
                         Text { text: "\u{E3C9}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; vertical-alignment: center; }
                         Text { text: @tr("Edit"); color: Theme.text-primary; font-size: Theme.fs-md; vertical-alignment: center; horizontal-stretch: 1; }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.border-subtle; }
+
+                for s[i] in root.all-sessions : Rectangle {
+                    visible: s.group-header != "" && s.group-header != root.session.group;
+                    height: self.visible ? 28px : 0px;
+                    border-radius: Theme.radius-sm;
+                    background: mv-ta.has-hover ? Theme.bg-hover : transparent;
+                    mv-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.move-to-group(s.group-header); }
+                    }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        spacing: 8px;
+                        alignment: center;
+                        Text { text: "\u{E2C7}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; vertical-alignment: center; }
+                        Text { text: s.group-header; color: Theme.text-primary; font-size: Theme.fs-md; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
                     }
                 }
 
@@ -154,6 +179,8 @@ export component Welcome inherits Rectangle {
     callback import-ssh-config();
     callback connect-session(string);
     callback edit-session(string);
+    callback move-session(string /* id */, string /* group */);
+    callback toggle-group(string /* group */);
     callback remove-session(string);
 
     background: Theme.bg-root;
@@ -239,11 +266,50 @@ export component Welcome inherits Rectangle {
 
                 if sessions.length > 0 : VerticalLayout {
                     spacing: 2px;
-                    for session[i] in sessions : SessionRow {
-                        session: session;
-                        connect => { root.connect-session(session.id); }
-                        edit => { root.edit-session(session.id); }
-                        remove => { root.remove-session(session.id); }
+                    for session[i] in sessions : VerticalLayout {
+                        spacing: 2px;
+                        if session.group-header != "" : Rectangle {
+                            height: 26px;
+                            HorizontalLayout {
+                                padding-top: 6px;
+                                padding-left: 4px;
+                                spacing: 4px;
+                                Text {
+                                    text: session.collapsed ? "\u{E5CC}" : "\u{E5CF}";
+                                    font-family: "Material Icons";
+                                    color: Theme.text-muted;
+                                    font-size: Theme.fs-sm;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: "\u{E2C7}";
+                                    font-family: "Material Icons";
+                                    color: Theme.text-muted;
+                                    font-size: Theme.fs-sm;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: session.group-header;
+                                    color: Theme.text-muted;
+                                    font-size: Theme.fs-xs;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.toggle-group(session.group); }
+                            }
+                        }
+                        if !session.collapsed : SessionRow {
+                            session: session;
+                            all-sessions: root.sessions;
+                            connect => { root.connect-session(session.id); }
+                            edit => { root.edit-session(session.id); }
+                            move-to-group(g) => { root.move-session(session.id, g); }
+                            remove => { root.remove-session(session.id); }
+                        }
                     }
                 }
             }

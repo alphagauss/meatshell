@@ -33,7 +33,7 @@
 - 改终端按键、鼠标上报、resize、复制/粘贴、选区生命周期：先看 `src/app/terminal_input.rs` 和 `src/app/mod.rs`，再看 `ui/terminal_view.slint`
 - 改终端显示、选区、搜索、高亮、Tab 切换、回调绑定：先看 `src/app/terminal_render.rs`、`src/app/events.rs`、`src/app/models.rs`、`src/app/tabs.rs` 和 `src/app/mod.rs`，再看 `ui/app.slint` 和 `ui/terminal_view.slint`
 - 改会话事件泵、终端事件到 UI 的映射、连接成功后自动启动隧道：先看 `src/app/events.rs`、`src/app/tunnels.rs` 和 `src/ssh.rs`
-- 改会话列表模型、会话对话框、导入 `~/.ssh/config`、连接入口：先看 `src/app/sessions.rs`、`src/config.rs` 和 `ui/app.slint`
+- 改会话列表模型、会话分组、会话对话框、导入 `~/.ssh/config`、导入/导出连接、连接入口：先看 `src/app/sessions.rs`、`src/config.rs` 和 `ui/app.slint`
 - 改 tab 关闭/新建、断开/重连当前 tab：先看 `src/app/tabs.rs`、`src/app/mod.rs` 和 `ui/app.slint`
 - 改 SSH 连接运行态、断开、重连、连接状态入口：先看 `src/connection.rs`、`src/app/tabs.rs`、`src/app/mod.rs` 和 `src/ssh.rs`
 - 改 SSH 认证、远端监控、OSC7 路径解析、出站代理：先看 `src/ssh.rs` 和 `src/proxy.rs`
@@ -42,7 +42,7 @@
 - 改隧道 Local Forward、规则持久化、自动启停、端口占用状态：先看 `src/tunnel.rs`、`src/app/tunnels.rs`，再看 `ui/tunnel_panel.slint`
 - 改 app 内部状态别名、TabStatus、TransferWindowState、NetHistory：先看 `src/app/types.rs`
 - 改窗口居中和鼠标位置：先看 `src/app/platform.rs`
-- 改会话持久化、密码字段、代理字段、下载目录、语言配置：先看 `src/app/sessions.rs`、`src/config.rs`
+- 改会话持久化、密码字段、代理字段、分组字段、导入/导出连接、下载目录、语言配置：先看 `src/app/sessions.rs`、`src/config.rs`
 - 改本机 CPU / 内存 / 网络 / 磁盘侧边栏：先看 `src/app/sidebar.rs`、`src/system.rs` 和 `ui/sidebar.slint`
 - 改语言、翻译、`@tr(...)` 文案：先看 `src/i18n.rs`、`build.rs`、`lang/*`、`ui/*.slint`
 - 改导入 `~/.ssh/config`：先看 `src/ssh_config.rs`
@@ -170,8 +170,8 @@
 
 ### `src/app/sessions.rs`
 职责：
-- 保存会话列表模型同步和会话对话框 / 连接入口的 UI glue
-- 负责把 `ConfigStore`、会话模型和连接启动逻辑接到 Slint 回调
+- 保存会话列表模型同步、分组排序/折叠/移动、会话对话框 / 连接入口的 UI glue
+- 负责把 `ConfigStore`、会话模型、连接导入导出和连接启动逻辑接到 Slint 回调
 - `connect-session` 回调里即时读取 `ConfigStore::terminal_engine_mode()`，并在 Alacritty 初始化失败时把当前新建会话回退到 Legacy；因此设置里的终端引擎切换只影响新建会话，不影响已有 tab / reconnect
 
 关键符号：
@@ -454,6 +454,8 @@
 - `ConfigStore::upsert(...)`
 - `ConfigStore::remove(...)`
 - `ConfigStore::get(...)`
+- `ConfigStore::export_to(...)`
+- `ConfigStore::import_from(...)`
 - `ConfigStore::download_dir(...)`
 - `ConfigStore::set_download_dir(...)`
 - `ConfigStore::language(...)`
@@ -537,7 +539,7 @@
 - 顶层窗口 `AppWindow`
 - 定义 Rust 侧需要的全部回调和模型字段
 - 组装左侧栏、Tab 栏、顶部工具栏、欢迎页、终端页、底部面板、会话对话框
-- 右上角 settings popup 继续承载导入 `~/.ssh/config`、语言切换、终端引擎默认值切换和 About 入口
+- 右上角 settings popup 继续承载导入 `~/.ssh/config`、连接导入/导出、语言切换、终端引擎默认值切换和 About 入口
 - settings popup 还承载终端字体和字号选择；主题暗/亮状态通过 `dark-mode` 绑定到 `Theme.dark`
 - 暴露 `sidebar-visible`、`bottom-panel-visible`、`bottom-panel-tab` 布局状态给 Rust 侧 `AppState`
 - 暴露当前 active session 的 `tunnel-rules` 模型和隧道规则增删改/启用回调给 Rust
@@ -554,6 +556,8 @@
 - `disconnect-active-tab`
 - `reconnect-active-tab`
 - `open-transfer-window`
+- `export-sessions`
+- `import-sessions`
 - `terminal-engine-mode`
 - `set-terminal-engine-mode`
 - `dark-mode`
@@ -569,11 +573,14 @@
 - `tunnel-delete-rule`
 - `terminal-mouse`
 - `dialog-proxy`
+- `dialog-group`
+- `move-session`
+- `toggle-group`
 - 导出类型：`SessionInfo`、`SessionDraft`、`TabInfo`、`SftpEntry`、`SftpTreeNode`、`TunnelRuleInfo`
 
 定位提示：
 - Rust 回调名、属性名、模型字段改动时，先改这里
-- 会话弹窗字段（例如 `dialog-proxy`）改动时，先对照 `ui/session_dialog.slint` 和 `src/app/mod.rs`
+- 会话弹窗字段（例如 `dialog-proxy`、`dialog-group`）改动时，先对照 `ui/session_dialog.slint` 和 `src/app/mod.rs`
 - `src/app/mod.rs` 的 wiring 代码和这里必须一一对应
 
 ### `ui/terminal_view.slint`
@@ -688,7 +695,7 @@
 职责：
 - 欢迎页
 - 快速连接
-- 会话列表
+- 会话列表、group header 渲染、折叠/展开和右键移动 group
 
 关键符号：
 - `SessionInfo`
@@ -697,10 +704,11 @@
 
 ### `ui/session_dialog.slint`
 职责：
-- 新建 / 编辑 SSH 会话弹窗，包含可选出站代理输入
+- 新建 / 编辑 SSH 会话弹窗，包含可选 group 和出站代理输入
 
 关键符号：
 - `SessionDraft`
+- `draft-group`
 - `draft-proxy`
 - `SessionDialog`
 
