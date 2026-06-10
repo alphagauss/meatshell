@@ -542,6 +542,7 @@
 - 组装左侧栏、顶部工具栏、Tab 栏、欢迎页、终端页、底部面板、会话对话框；右侧主区域顺序是顶部工具栏、Tab 栏、内容区
 - 右上角 settings popup 继续承载导入 `~/.ssh/config`、连接导入/导出、语言切换、终端引擎默认值切换和 About 入口
 - settings popup 还承载终端字体和字号选择；主题暗/亮状态通过 `dark-mode` 绑定到 `Theme.dark`
+- 根组件末尾承载全局 tooltip 浮层，`TopActionBar` 只上报 tooltip 文案和窗口坐标，避免按钮内部 tooltip 被裁剪
 - 暴露 `sidebar-visible`、`bottom-panel-visible`、`bottom-panel-tab` 布局状态给 Rust 侧 `AppState`
 - 暴露当前 active session 的 `tunnel-rules` 模型和隧道规则增删改/启用回调给 Rust
 
@@ -573,6 +574,9 @@
 - `tunnel-toggle-rule`
 - `tunnel-delete-rule`
 - `terminal-mouse`
+- `global-tooltip-text`
+- `global-tooltip-x`
+- `global-tooltip-y`
 - `dialog-proxy`
 - `dialog-group`
 - `move-session`
@@ -607,11 +611,14 @@
 
 ### `ui/top_action_bar.slint`
 职责：
-- 标签页下方的固定工具栏
+- 标签页上方的固定工具栏
 - 提供侧边栏显隐、底部面板显隐、断开、重连、新建文件传输按钮
+- Action 按钮 hover 时通过 `tooltip-show` / `tooltip-hide` 把 tooltip 交给 `AppWindow` 根浮层显示
 
 关键符号：
 - `TopActionBar`
+- `tooltip-show`
+- `tooltip-hide`
 
 ### `ui/bottom_panel.slint`
 职责：

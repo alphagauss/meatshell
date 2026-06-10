@@ -98,6 +98,9 @@ export component AppWindow inherits Window {
     in-out property <bool> download-open: false;  // download manager popup
     in-out property <bool> settings-open: false;  // settings menu popup
     in-out property <bool> about-open: false;     // centered About dialog
+    in-out property <string> global-tooltip-text: "";
+    in-out property <length> global-tooltip-x: 0px;
+    in-out property <length> global-tooltip-y: 0px;
     in-out property <string> settings-hint;
     in property <string> download-dir;      // preset SFTP download folder ("" = ask)
     in property <[TransferInfo]> transfers; // download/upload records (newest first)
@@ -255,6 +258,14 @@ export component AppWindow inherits Window {
                 disconnect-active-tab => { root.disconnect-active-tab(); }
                 reconnect-active-tab => { root.reconnect-active-tab(); }
                 open-transfer-window => { root.open-transfer-window(); }
+                tooltip-show(text, x, y) => {
+                    root.global-tooltip-text = text;
+                    root.global-tooltip-x = x;
+                    root.global-tooltip-y = y;
+                }
+                tooltip-hide => {
+                    root.global-tooltip-text = "";
+                }
             }
 
             TabBar {
@@ -908,5 +919,28 @@ export component AppWindow inherits Window {
         submit(draft) => { root.session-dialog-submit(draft); }
         cancel => { root.session-dialog-cancel(); }
         pick-key-file => { root.session-dialog-pick-key(); }
+    }
+
+    if root.global-tooltip-text != "" : Rectangle {
+        x: root.global-tooltip-x;
+        y: root.global-tooltip-y;
+        width: tip.preferred-width + 14px;
+        height: 24px;
+        border-radius: Theme.radius-sm;
+        background: Theme.bg-elevated;
+        border-width: 1px;
+        border-color: Theme.border-subtle;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: #00000040;
+
+        tip := Text {
+            x: 7px;
+            width: parent.width - 14px;
+            height: parent.height;
+            text: root.global-tooltip-text;
+            color: Theme.text-primary;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+        }
     }
 }

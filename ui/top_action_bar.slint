@@ -4,6 +4,8 @@ component ActionButton inherits Rectangle {
     in property <string> icon;
     in property <string> tooltip;
     callback clicked();
+    callback tooltip-show(string, length, length);
+    callback tooltip-hide();
 
     width: 28px;
     height: 28px;
@@ -19,30 +21,19 @@ component ActionButton inherits Rectangle {
         vertical-alignment: center;
     }
 
-    if touch.has-hover : Rectangle {
-        x: 0px;
-        y: 30px;
-        width: tip.preferred-width + 14px;
-        height: 24px;
-        border-radius: Theme.radius-sm;
-        background: Theme.bg-elevated;
-        border-width: 1px;
-        border-color: Theme.border-subtle;
-        drop-shadow-blur: 8px;
-        drop-shadow-color: #00000040;
-
-        tip := Text {
-            x: 7px;
-            text: root.tooltip;
-            color: Theme.text-primary;
-            font-size: Theme.fs-xs;
-            vertical-alignment: center;
-        }
-    }
-
     touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        clicked => {
+            root.tooltip-hide();
+            root.clicked();
+        }
+        changed has-hover => {
+            if self.has-hover {
+                root.tooltip-show(root.tooltip, root.absolute-position.x, root.absolute-position.y + root.height + 2px);
+            } else {
+                root.tooltip-hide();
+            }
+        }
     }
 }
 
@@ -55,6 +46,8 @@ export component TopActionBar inherits Rectangle {
     callback disconnect-active-tab();
     callback reconnect-active-tab();
     callback open-transfer-window();
+    callback tooltip-show(string, length, length);
+    callback tooltip-hide();
 
     height: 34px;
     background: Theme.bg-panel;
@@ -69,12 +62,16 @@ export component TopActionBar inherits Rectangle {
             icon: root.sidebar-visible ? "\u{E5D2}" : "\u{E5D2}";
             tooltip: @tr("Toggle sidebar");
             clicked => { root.toggle-sidebar(); }
+            tooltip-show(text, x, y) => { root.tooltip-show(text, x, y); }
+            tooltip-hide => { root.tooltip-hide(); }
         }
 
         ActionButton {
             icon: root.bottom-panel-visible ? "\u{E5DB}" : "\u{E5D8}";
             tooltip: @tr("Toggle file panel");
             clicked => { root.toggle-bottom-panel(); }
+            tooltip-show(text, x, y) => { root.tooltip-show(text, x, y); }
+            tooltip-hide => { root.tooltip-hide(); }
         }
 
         Rectangle { width: 1px; height: 20px; background: Theme.border-subtle; }
@@ -83,18 +80,24 @@ export component TopActionBar inherits Rectangle {
             icon: "\u{E8AC}";
             tooltip: @tr("Disconnect");
             clicked => { root.disconnect-active-tab(); }
+            tooltip-show(text, x, y) => { root.tooltip-show(text, x, y); }
+            tooltip-hide => { root.tooltip-hide(); }
         }
 
         ActionButton {
             icon: "\u{E5D5}";
             tooltip: @tr("Reconnect");
             clicked => { root.reconnect-active-tab(); }
+            tooltip-show(text, x, y) => { root.tooltip-show(text, x, y); }
+            tooltip-hide => { root.tooltip-hide(); }
         }
 
         ActionButton {
             icon: "\u{E2C6}";
             tooltip: @tr("New transfer window");
             clicked => { root.open-transfer-window(); }
+            tooltip-show(text, x, y) => { root.tooltip-show(text, x, y); }
+            tooltip-hide => { root.tooltip-hide(); }
         }
 
         Rectangle { horizontal-stretch: 1; }
