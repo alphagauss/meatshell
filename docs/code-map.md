@@ -416,6 +416,9 @@
 - `list_dir_impl(...)`
 - `list_dirs_only_impl(...)`
 - `download_impl(...)`
+- `download_dir(...)`
+- `remove_dir_recursive(...)`
+- `upload_dir(...)`
 - `upload_pipelined(...)`
 - `spawn_edit_watcher(...)`
 - `emit_transfer(...)`

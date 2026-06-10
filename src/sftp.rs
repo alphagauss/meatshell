@@ -361,62 +361,131 @@ async fn run_sftp(
             }
 
             SftpCommand::Download { remote, local_dir } => {
-                let filename = base_name(&remote);
-                let local_path = format!("{}/{}", local_dir.trim_end_matches('/'), filename);
-                let id = Uuid::new_v4().to_string();
-                let _ = events.send(SessionEvent::SftpStatus(format!(
-                    "{} {}...",
-                    t("下载", "Downloading"),
-                    filename
-                )));
-                match download_impl(&sftp, &remote, &local_path, &filename, &id, &events).await {
-                    Ok(_) => {
-                        let _ = events.send(SessionEvent::SftpStatus(format!(
-                            "{}: {}",
-                            t("下载完成", "Downloaded"),
-                            filename
-                        )));
+                let is_dir = sftp
+                    .metadata(&remote)
+                    .await
+                    .ok()
+                    .map(|m| (m.permissions.unwrap_or(0) & 0o170_000) == 0o040_000)
+                    .unwrap_or(false);
+
+                if is_dir {
+                    let dirname = base_name(&remote);
+                    let _ = events.send(SessionEvent::SftpStatus(format!(
+                        "{} {}/...",
+                        t("下载文件夹", "Downloading folder"),
+                        dirname
+                    )));
+                    match download_dir(&sftp, &remote, &local_dir, &events).await {
+                        Ok(_) => {
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {}",
+                                t("下载完成", "Downloaded"),
+                                dirname
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {e}",
+                                t("下载失败", "Download failed")
+                            )));
+                        }
                     }
-                    Err(e) => {
-                        emit_transfer(&events, &id, &filename, false, 0, 0, 2, &e.to_string());
-                        let _ = events.send(SessionEvent::SftpStatus(format!(
-                            "{}: {e}",
-                            t("下载失败", "Download failed")
-                        )));
+                } else {
+                    let filename = sanitize_filename(&base_name(&remote));
+                    let local_path = format!("{}/{}", local_dir.trim_end_matches('/'), filename);
+                    let id = Uuid::new_v4().to_string();
+                    let _ = events.send(SessionEvent::SftpStatus(format!(
+                        "{} {}...",
+                        t("下载", "Downloading"),
+                        filename
+                    )));
+                    match download_impl(&sftp, &remote, &local_path, &filename, &id, &events).await
+                    {
+                        Ok(_) => {
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {}",
+                                t("下载完成", "Downloaded"),
+                                filename
+                            )));
+                        }
+                        Err(e) => {
+                            emit_transfer(&events, &id, &filename, false, 0, 0, 2, &e.to_string());
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {e}",
+                                t("下载失败", "Download failed")
+                            )));
+                        }
                     }
                 }
             }
 
             SftpCommand::Upload { local, remote_dir } => {
-                let filename = base_name(&local);
-                let remote_path = format!("{}/{}", remote_dir.trim_end_matches('/'), filename);
-                let id = Uuid::new_v4().to_string();
-                let _ = events.send(SessionEvent::SftpStatus(format!(
-                    "{} {}...",
-                    t("上传", "Uploading"),
-                    filename
-                )));
-                match upload_pipelined(&handle, &local, &remote_path, &filename, &id, &events).await
-                {
-                    Ok(_) => {
-                        if let Ok(entries) = list_dir_impl(&sftp, &remote_dir).await {
-                            let _ = events.send(SessionEvent::SftpEntries {
-                                path: remote_dir.clone(),
-                                entries,
-                            });
-                        }
-                        let _ = events.send(SessionEvent::SftpStatus(format!(
-                            "{}: {}",
-                            t("上传完成", "Uploaded"),
-                            filename
-                        )));
+                let is_dir = tokio::fs::metadata(&local)
+                    .await
+                    .map(|m| m.is_dir())
+                    .unwrap_or(false);
+
+                if is_dir {
+                    let dirname = base_name(&local);
+                    let _ = events.send(SessionEvent::SftpStatus(format!(
+                        "{} {}/...",
+                        t("上传文件夹", "Uploading folder"),
+                        dirname
+                    )));
+                    let res = upload_dir(&handle, &sftp, &local, &remote_dir, &events).await;
+                    if let Ok(entries) = list_dir_impl(&sftp, &remote_dir).await {
+                        let _ = events.send(SessionEvent::SftpEntries {
+                            path: remote_dir.clone(),
+                            entries,
+                        });
                     }
-                    Err(e) => {
-                        emit_transfer(&events, &id, &filename, true, 0, 0, 2, &e.to_string());
-                        let _ = events.send(SessionEvent::SftpStatus(format!(
-                            "{}: {e}",
-                            t("上传失败", "Upload failed")
-                        )));
+                    match res {
+                        Ok(_) => {
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {}",
+                                t("上传完成", "Uploaded"),
+                                dirname
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {e}",
+                                t("上传失败", "Upload failed")
+                            )));
+                        }
+                    }
+                } else {
+                    let filename = base_name(&local);
+                    let remote_path = format!("{}/{}", remote_dir.trim_end_matches('/'), filename);
+                    let id = Uuid::new_v4().to_string();
+                    let _ = events.send(SessionEvent::SftpStatus(format!(
+                        "{} {}...",
+                        t("上传", "Uploading"),
+                        filename
+                    )));
+                    match upload_pipelined(&handle, &local, &remote_path, &filename, &id, &events)
+                        .await
+                    {
+                        Ok(_) => {
+                            if let Ok(entries) = list_dir_impl(&sftp, &remote_dir).await {
+                                let _ = events.send(SessionEvent::SftpEntries {
+                                    path: remote_dir.clone(),
+                                    entries,
+                                });
+                            }
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {}",
+                                t("上传完成", "Uploaded"),
+                                filename
+                            )));
+                        }
+                        Err(e) => {
+                            emit_transfer(&events, &id, &filename, true, 0, 0, 2, &e.to_string());
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {e}",
+                                t("上传失败", "Upload failed")
+                            )));
+                        }
                     }
                 }
             }
@@ -428,10 +497,20 @@ async fn run_sftp(
                     t("删除", "Deleting"),
                     filename
                 )));
-                // Try as a file first, then as an (empty) directory.
-                let res = match sftp.remove_file(&path).await {
-                    Ok(_) => Ok(()),
-                    Err(_) => sftp.remove_dir(&path).await.map(|_| ()),
+                let is_dir = sftp
+                    .metadata(&path)
+                    .await
+                    .ok()
+                    .map(|m| (m.permissions.unwrap_or(0) & 0o170_000) == 0o040_000)
+                    .unwrap_or(false);
+
+                let res: Result<()> = if is_dir {
+                    remove_dir_recursive(&sftp, &path).await
+                } else {
+                    sftp.remove_file(&path)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| anyhow!("{e}"))
                 };
                 match res {
                     Ok(_) => {
@@ -580,11 +659,15 @@ fn open_with_os(path: &str) {
     let _ = std::process::Command::new("xdg-open").arg(path).spawn();
 }
 
-/// Make a remote-supplied file name safe to use as a *local* temp file name:
-/// drops path separators (defence-in-depth against traversal) and replaces
-/// characters that are invalid on Windows or special to shells with `_`.
-/// Normal names (letters, digits, `.`, `-`, `_`, spaces, Unicode) pass through
-/// unchanged.  Falls back to `file` when nothing usable remains.
+/// Make a remote-supplied file name safe to use as a *local* file name.
+///
+/// This is used for both downloads and temp files: drops path separators
+/// (defence-in-depth against traversal), replaces characters invalid on
+/// Windows or special to shells with `_`, trims surrounding whitespace and
+/// Windows' trailing dots, and neutralises reserved device names (CON, NUL,
+/// COM1...). Normal names (letters, digits, `.`, `-`, `_`, Unicode) pass
+/// through; Unix dotfiles keep their leading dot. Falls back to `file` when
+/// nothing usable remains.
 fn sanitize_filename(name: &str) -> String {
     let cleaned: String = name
         .chars()
@@ -595,10 +678,38 @@ fn sanitize_filename(name: &str) -> String {
             c => c,
         })
         .collect();
-    // Windows strips trailing dots/spaces; do it ourselves to avoid surprises.
-    let trimmed = cleaned.trim_end_matches([' ', '.']);
+    let trimmed = cleaned.trim_start_matches(' ').trim_end_matches([' ', '.']);
     if trimmed.is_empty() {
-        "file".to_string()
+        return "file".to_string();
+    }
+    let stem = trimmed.split('.').next().unwrap_or(trimmed);
+    let reserved = matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    );
+    if reserved {
+        format!("_{trimmed}")
     } else {
         trimmed.to_string()
     }
@@ -768,6 +879,92 @@ async fn download_impl(
     }
     local_file.flush().await.context("flush local file")?;
     emit_transfer(events, id, name, false, done, total.max(done), 1, "");
+    Ok(())
+}
+
+/// Recursively download a remote directory tree under `local_parent`.
+async fn download_dir(
+    sftp: &SftpSession,
+    remote_root: &str,
+    local_parent: &str,
+    events: &UnboundedSender<SessionEvent>,
+) -> Result<()> {
+    let root_name = sanitize_filename(&base_name(remote_root));
+    let root_local = format!("{}/{}", local_parent.trim_end_matches('/'), root_name);
+    let mut stack = vec![(remote_root.trim_end_matches('/').to_string(), root_local)];
+    while let Some((remote_dir, local_dir)) = stack.pop() {
+        tokio::fs::create_dir_all(&local_dir)
+            .await
+            .with_context(|| format!("create local dir {local_dir}"))?;
+        for entry in list_dir_impl(sftp, &remote_dir).await? {
+            if entry.is_dir {
+                let child_local = format!("{}/{}", local_dir, sanitize_filename(&entry.name));
+                stack.push((entry.full_path, child_local));
+            } else {
+                let filename = sanitize_filename(&entry.name);
+                let local_path = format!("{}/{}", local_dir, filename);
+                let id = Uuid::new_v4().to_string();
+                download_impl(sftp, &entry.full_path, &local_path, &filename, &id, events).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Recursively remove a remote directory tree.
+async fn remove_dir_recursive(sftp: &SftpSession, root: &str) -> Result<()> {
+    let mut all_dirs = vec![root.trim_end_matches('/').to_string()];
+    let mut index = 0;
+    while index < all_dirs.len() {
+        let dir = all_dirs[index].clone();
+        index += 1;
+        for entry in list_dir_impl(sftp, &dir).await? {
+            if entry.is_dir {
+                all_dirs.push(entry.full_path);
+            } else {
+                sftp.remove_file(&entry.full_path)
+                    .await
+                    .map_err(|e| anyhow!("remove file {}: {e}", entry.full_path))?;
+            }
+        }
+    }
+    for dir in all_dirs.iter().rev() {
+        sftp.remove_dir(dir)
+            .await
+            .map_err(|e| anyhow!("remove dir {dir}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Recursively upload a local directory tree into `remote_parent`.
+async fn upload_dir(
+    handle: &client::Handle<SftpClientHandler>,
+    sftp: &SftpSession,
+    local_root: &str,
+    remote_parent: &str,
+    events: &UnboundedSender<SessionEvent>,
+) -> Result<()> {
+    let root_name = base_name(local_root);
+    let remote_root = format!("{}/{}", remote_parent.trim_end_matches('/'), root_name);
+    let mut stack = vec![(local_root.to_string(), remote_root)];
+    while let Some((local_dir, remote_dir)) = stack.pop() {
+        let _ = sftp.create_dir(&remote_dir).await;
+        let mut entries = tokio::fs::read_dir(&local_dir)
+            .await
+            .with_context(|| format!("read local dir {local_dir}"))?;
+        while let Some(entry) = entries.next_entry().await.context("read dir entry")? {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let local_path = entry.path().to_string_lossy().to_string();
+            let remote_path = format!("{}/{}", remote_dir, name);
+            let file_type = entry.file_type().await.context("file type")?;
+            if file_type.is_dir() {
+                stack.push((local_path, remote_path));
+            } else if file_type.is_file() {
+                let id = Uuid::new_v4().to_string();
+                upload_pipelined(handle, &local_path, &remote_path, &name, &id, events).await?;
+            }
+        }
+    }
     Ok(())
 }
 
