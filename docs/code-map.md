@@ -360,6 +360,7 @@
 - 远端资源监控采样
 - 远端资源监控使用固定 PATH，解析时限制 monitor buffer、网卡和磁盘条目数量，并使用饱和计算防止异常输出导致内存增长或 debug 溢出
 - 解析 OSC7 当前目录信息，并在需要时经 `src/proxy.rs` 建连
+- 注入 `PROMPT_COMMAND` 获取远程 cwd 时使用前导空格并过滤回显，避免 bookkeeping 命令显示或进入常见 shell history
 
 关键符号：
 - `RemoteEntry`
