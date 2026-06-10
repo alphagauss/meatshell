@@ -34,6 +34,10 @@ vt100 = "0.15"
 russh-sftp = "2"
 rfd = "0.15"
 arboard = "3"
+# Enumerate installed system fonts for the Interface font picker.
+fontdb = "0.16"
+# Detect whether the OS is running in dark or light mode.
+dark-light = "1"
 # Zeroes password buffers on drop so plaintext credentials don't linger in
 # freed heap memory (core dumps / debuggers / /proc/pid/mem).
 zeroize = "1"
@@ -50,6 +54,11 @@ slint-build = "1.8"
 # show the app icon. Windows-only; ignored on other targets.
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Native Wayland clipboard so copy/paste works on Wayland sessions without
+# relying on XWayland.
+arboard = { version = "3", features = ["wayland-data-control"] }
 
 [profile.release]
 opt-level = 3
