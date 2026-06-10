@@ -210,6 +210,7 @@
 - 保存独立文件传输窗口的 UI glue
 - 负责把 `src/file_transfer.rs` 的本地目录 helper 和 `src/sftp.rs` 的 worker 接到 `ui/transfer_window.slint`
 - 顶部工具栏的打开文件传输入口通过 `active_session_or_hint(...)` 阻止欢迎页误开窗口
+- 文件传输窗口当前是单例：重复打开时复用已有 `TransferWindowState` 并重新 show，关闭按钮和窗口关闭请求只 hide，不销毁 SFTP 状态
 
 关键符号：
 - `open_transfer_window(...)`
@@ -235,7 +236,7 @@
 ### `src/app/types.rs`
 职责：
 - 保存 app 作用域内的状态别名和轻量结构体，供 `src/app/mod.rs` 和后续 app 子模块复用
-- 现在只放连接 / SFTP / 隧道 / 终端缓冲区相关的别名、tab 状态、传输窗口状态和网卡历史长度常量
+- 现在只放连接 / SFTP / 隧道 / 终端缓冲区相关的别名、tab 状态、单例传输窗口状态和网卡历史长度常量
 
 关键符号：
 - `TermBuffers`

@@ -159,7 +159,7 @@ pub fn run() -> Result<()> {
     let tab_statuses: TabStatuses = Arc::new(Mutex::new(HashMap::new()));
     let local_snap: LocalSnap = Arc::new(Mutex::new(SystemSnapshot::default()));
     let local_net_hist: NetHist = Arc::new(Mutex::new(vec![0.0; NET_HISTORY_LEN]));
-    let transfer_windows: TransferWindows = Rc::new(RefCell::new(Vec::new()));
+    let transfer_windows: TransferWindows = Rc::new(RefCell::new(None));
 
     // --- Wire callbacks --------------------------------------------------
     wire_layout_callbacks(&window, app_state.clone());

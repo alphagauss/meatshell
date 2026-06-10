@@ -44,10 +44,10 @@ pub(super) type LocalSnap = Arc<Mutex<SystemSnapshot>>;
 
 #[allow(dead_code)]
 pub(super) struct TransferWindowState {
-    pub(super) _window: super::TransferWindow,
+    pub(super) window: super::TransferWindow,
     pub(super) _sftp: Rc<SftpHandle>,
 }
-pub(super) type TransferWindows = Rc<RefCell<Vec<TransferWindowState>>>;
+pub(super) type TransferWindows = Rc<RefCell<Option<TransferWindowState>>>;
 
 /// Number of samples kept for the sparkline.
 pub(super) const NET_HISTORY_LEN: usize = 60;

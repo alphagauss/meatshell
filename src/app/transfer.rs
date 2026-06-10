@@ -23,6 +23,14 @@ pub(super) fn open_transfer_window(
     preferred_local_dir: String,
     transfer_windows: TransferWindows,
 ) -> Result<()> {
+    if let Some(existing) = transfer_windows.borrow().as_ref() {
+        existing
+            .window
+            .show()
+            .context("failed to show transfer window")?;
+        return Ok(());
+    }
+
     let window = TransferWindow::new().context("failed to build transfer window")?;
     window.set_session_title(
         format!(
@@ -45,15 +53,17 @@ pub(super) fn open_transfer_window(
     wire_transfer_window_callbacks(&window, sftp.clone());
     spawn_transfer_sftp_event_pump(window.as_weak(), sftp_rx);
     window.window().on_close_requested({
-        let sftp = sftp.clone();
+        let weak = window.as_weak();
         move || {
-            sftp.close();
+            if let Some(w) = weak.upgrade() {
+                let _ = w.hide();
+            }
             slint::CloseRequestResponse::HideWindow
         }
     });
     window.show().context("failed to show transfer window")?;
-    transfer_windows.borrow_mut().push(TransferWindowState {
-        _window: window,
+    *transfer_windows.borrow_mut() = Some(TransferWindowState {
+        window,
         _sftp: sftp,
     });
     Ok(())
@@ -155,7 +165,6 @@ pub(super) fn wire_transfer_window_callbacks(window: &TransferWindow, sftp: Rc<S
     {
         let weak = window.as_weak();
         window.on_close_window(move || {
-            sftp.close();
             if let Some(w) = weak.upgrade() {
                 let _ = w.hide();
             }
